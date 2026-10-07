@@ -1,0 +1,13 @@
+# Chat logs (contain pasted secrets)
+2026-adding the issues to the github.txt
+adding issues to github downloading the necessary tool.txt
+
+# Local agent worktrees
+.claude/worktrees/
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+.env.*

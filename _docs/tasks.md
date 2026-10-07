@@ -1,0 +1,57 @@
+# BudgetControl — Task Backlog
+
+## 1. Go backend skeleton with a passing test
+Goal: Scaffold an empty Go project that compiles and has one passing test.
+Description: Initialize a Go module under `backend/`, add a minimal HTTP server that responds to `GET /health` with `200 OK`, and write one test that asserts that response. No database or business logic yet — just a working, testable foundation.
+
+## 2. React frontend skeleton with a passing test
+Goal: Scaffold an empty React app (Vite) that renders and has one passing test.
+Description: Create the project under `frontend/` using Vite with the React + TypeScript template. Set up Tailwind CSS v4 and run `shadcn init` with the indigo theme and CSS variables, following `_docs/design-system.md` (light and dark tokens in `src/index.css`). Replace the default page with a bare `<App />` component that renders a heading, and add one Vitest/Testing Library test that asserts the heading is present. No routing, API calls, or other shadcn components yet.
+
+## 3. Neon database schema
+Goal: Create the PostgreSQL schema on Neon with all four tables.
+Description: Using the Neon console or migration SQL file, create `users`, `categories`, `expenses`, and `budgets` tables matching the schema in `_docs/plan.md`. Amounts are `BIGINT` whole tenge, `budgets.month` is a `DATE` with a `CHECK` that it is the 1st of the month, and `budgets` has a unique index on (user_id, category_id, month) using `NULLS NOT DISTINCT` (Postgres 15+). Seed the `categories` table with the default categories (Food, Transport, Housing, Entertainment, Health, Other). Commit the SQL file to `backend/db/schema.sql`.
+
+## 4. Backend: user registration endpoint
+Goal: Implement `POST /auth/register` that creates a new user.
+Description: Accept `email` and `password` in the request body, hash the password with bcrypt, insert a row into `users`, and return `201` with the new user's id and email. Return a clear error if the email is already taken. Write a test that covers both the success and duplicate-email cases.
+
+## 5. Backend: login endpoint and JWT middleware
+Goal: Implement `POST /auth/login` and protect routes with a JWT middleware.
+Description: Verify the email/password against the database, sign a JWT containing the user id and an expiry, and return it in the response body. Add middleware that reads the `Authorization: Bearer <token>` header, validates the JWT, and attaches the user id to the request context. Write tests for valid login, wrong password, and a protected route accessed without a token.
+
+## 6. Backend: categories endpoints
+Goal: Implement full category management behind auth.
+Description: `GET /categories` returns the authenticated user's custom categories merged with the global defaults (where `user_id IS NULL`). `POST /categories` creates a custom category (name + color). `PUT /categories/:id` renames or recolors a custom category. `DELETE /categories/:id` moves the category's expenses to the default "Other" category, then deletes the category and its budget rows (in one transaction). Default categories and other users' categories return `403` on `PUT` and `DELETE`. All endpoints require a valid JWT. Write tests for listing (including defaults), creating, updating, deleting with expenses reassigned to "Other", and the `403` cases.
+
+## 7. Backend: expenses endpoints
+Goal: Implement full CRUD for expenses behind auth.
+Description: Implement `GET /expenses`, `POST /expenses`, `GET /expenses/:id`, `PUT /expenses/:id`, and `DELETE /expenses/:id`. Each operation must be scoped to the authenticated user — users must never see or modify another user's expenses. Write tests covering create, list, update, and delete, plus an unauthorized-access case.
+
+## 8. Backend: budgets endpoints
+Goal: Implement `GET /budgets` and `PUT /budgets` behind auth.
+Description: `GET` returns all budget rows for the authenticated user for a given month (passed as a query param, e.g. `?month=2026-10`). `PUT` upserts a budget for a specific category (or the overall budget when `category_id` is omitted). Write tests for fetching an empty month, setting a budget, and updating an existing one.
+
+## 9. Frontend: app shell with routing
+Goal: Set up React Router with placeholder pages and a persistent nav bar.
+Description: Install React Router and define routes for `/login`, `/register`, `/dashboard`, `/expenses`, `/categories`, and `/budgets`. Each route renders a minimal placeholder component (just a heading). Add a nav bar that links between the authenticated pages and a simple auth guard that redirects unauthenticated users to `/login`. No real API calls yet.
+
+## 10. Frontend: register and login pages
+Goal: Build working auth forms connected to the backend API.
+Description: Create `Register` and `Login` form components with controlled inputs for email and password. On submit, call `POST /auth/register` or `POST /auth/login`, store the returned JWT in `localStorage`, and redirect to `/dashboard`. Display inline error messages for failed requests (wrong password, email taken, etc.).
+
+## 11. Frontend: expense list and add-expense form
+Goal: Build a page to view and log expenses.
+Description: Fetch and display the user's expenses from `GET /expenses` in a table (amount, category, date, note). Add a form above or in a modal to create a new expense via `POST /expenses`, with a category dropdown populated from `GET /categories`. Newly added expenses should appear in the list without a full page reload.
+
+## 12. Frontend: category management page
+Goal: Build a page to view, create, edit, and delete custom categories.
+Description: Fetch and display all categories (defaults + user's custom ones) from `GET /categories`. Provide a small form to create a new custom category (name + color picker), and edit and delete buttons on custom categories. Deleting asks for confirmation and says the category's expenses will move to "Other". Mark default categories visually so the user knows they cannot be edited or deleted. Changes should appear in the list immediately.
+
+## 13. Frontend: budget settings page
+Goal: Build a page to set per-category and overall monthly budgets.
+Description: Fetch the current month's budgets from `GET /budgets?month=<current>` and display them alongside each category name. Allow the user to type a new amount for any row and save it via `PUT /budgets`. Include a row for the overall monthly budget (no category). Show a success or error indicator after each save.
+
+## 14. Frontend: dashboard with spending pie chart
+Goal: Build the dashboard that shows a spending breakdown for the current month.
+Description: Use Recharts through the shadcn `Chart` component (see `_docs/design-system.md`) and render a pie chart showing total spending per category for the current month, derived from the expenses list. Below the chart, show a summary table with each category's spent amount vs. its budget (if set) and highlight over-budget categories. All data comes from the existing `GET /expenses` and `GET /budgets` endpoints.
