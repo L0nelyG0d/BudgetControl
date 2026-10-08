@@ -37,7 +37,7 @@ export default function ExpensesPage() {
       ])
       setState({
         status: 'ready',
-        data: { expenses: sortExpenses(expenses ?? []), categories: categories ?? [] },
+        data: { expenses: sortExpenses(Array.isArray(expenses) ? expenses : []), categories: Array.isArray(categories) ? categories : [] },
       })
     } catch {
       setState({ status: 'error' })
