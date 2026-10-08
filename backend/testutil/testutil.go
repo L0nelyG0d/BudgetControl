@@ -4,6 +4,7 @@ package testutil
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"budgetcontrol/api"
 	"budgetcontrol/db"
 )
 
@@ -72,4 +74,37 @@ func CreateUser(t *testing.T, pool *pgxpool.Pool, email string) int64 {
 		t.Fatalf("create user: %v", err)
 	}
 	return id
+}
+
+// TestSecret is the JWT secret tests use; pass it as api.Deps.JWTSecret.
+var TestSecret = []byte("test-secret-test-secret-test-secret-0123")
+
+// Deps returns api.Deps wired for tests (pool + TestSecret).
+func Deps(pool *pgxpool.Pool) api.Deps {
+	return api.Deps{DB: pool, JWTSecret: TestSecret}
+}
+
+// SessionCookie mints a valid session cookie for userID, signed with
+// TestSecret. Add it to a request with req.AddCookie.
+func SessionCookie(t *testing.T, userID int64) *http.Cookie {
+	t.Helper()
+	c, err := api.NewSessionCookie(TestSecret, userID, time.Now(), false)
+	if err != nil {
+		t.Fatalf("session cookie: %v", err)
+	}
+	return c
+}
+
+// NewUser creates a user (removed on cleanup) and returns its id, email and a
+// valid session cookie, so tests can call protected routes right away:
+//
+//	id, _, cookie := testutil.NewUser(t, pool)
+//	req.AddCookie(cookie)
+//
+// Use it twice to get two users for "another user's data" tests.
+func NewUser(t *testing.T, pool *pgxpool.Pool) (id int64, email string, cookie *http.Cookie) {
+	t.Helper()
+	email = UniqueEmail("user")
+	id = CreateUser(t, pool, email)
+	return id, email, SessionCookie(t, id)
 }

@@ -27,13 +27,22 @@ func main() {
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL is not set; set it to the PostgreSQL connection string")
 	}
+	deps := api.Deps{
+		JWTSecret:  []byte(os.Getenv("JWT_SECRET")),
+		Production: os.Getenv("APP_ENV") == "production",
+	}
+	if err := deps.Validate(); err != nil {
+		log.Fatal(err)
+	}
 	pool, err := db.Connect(context.Background(), dbURL)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
 	defer pool.Close()
 
+	deps.DB = pool
+
 	a := addr()
 	log.Printf("listening on %s", a)
-	log.Fatal(http.ListenAndServe(a, newMux(api.Deps{DB: pool})))
+	log.Fatal(http.ListenAndServe(a, newMux(deps)))
 }
