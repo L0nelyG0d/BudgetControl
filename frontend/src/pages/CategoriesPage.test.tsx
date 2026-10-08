@@ -13,7 +13,7 @@ const base = [
 
 type Handler = (url: string, init?: RequestInit) => Response | Promise<Response>
 function mockApi(handler: Handler) {
-  const fn = vi.fn(async (url: string, init?: RequestInit) => handler(_url, init))
+  const fn = vi.fn(async (url: string, init?: RequestInit) => handler(url, init))
   vi.stubGlobal('fetch', fn)
   return fn
 }
