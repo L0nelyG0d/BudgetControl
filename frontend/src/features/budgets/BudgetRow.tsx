@@ -1,5 +1,5 @@
 import { useId, useState } from 'react'
-import { Check, TriangleAlert } from 'lucide-react'
+import { Check, Trash2, TriangleAlert } from 'lucide-react'
 import { api } from '@/lib/api'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/button'
@@ -17,7 +17,7 @@ type Props = {
   initialAmount: number | undefined
 }
 
-type Status = { kind: 'idle' } | { kind: 'saved' } | { kind: 'error'; message: string }
+type Status = { kind: 'idle' } | { kind: 'saved' } | { kind: 'removed' } | { kind: 'error'; message: string }
 
 const WHOLE_POSITIVE = /^[1-9]\d{0,14}$/
 
@@ -36,6 +36,7 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState(false)
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -63,6 +64,27 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function remove() {
+    setRemoving(true)
+    setStatus({ kind: 'idle' })
+    setFieldError(null)
+    try {
+      const query = categoryId === null ? '' : `&category_id=${categoryId}`
+      await api(`/api/budgets?month=${month}${query}`, { method: 'DELETE' })
+      setSaved(undefined)
+      setValue('')
+      setStatus({ kind: 'removed' })
+    } catch (err) {
+      const message = err instanceof Error && err.message ? err.message : 'Could not remove'
+      setStatus({
+        kind: 'error',
+        message: `${message}. Check your connection and try again.`,
+      })
+    } finally {
+      setRemoving(false)
     }
   }
 
@@ -116,10 +138,27 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
           <Button type="submit" disabled={saving} aria-label={`Save ${name} budget`}>
             {saving ? 'Saving…' : 'Save'}
           </Button>
+          {saved !== undefined && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={removing || saving}
+              onClick={() => void remove()}
+              aria-label={`Remove ${name} budget`}
+            >
+              <Trash2 className="size-4" aria-hidden="true" />
+              {removing ? 'Removing…' : 'Remove'}
+            </Button>
+          )}
           <div role="status" className="basis-full text-xs">
             {status.kind === 'saved' && (
               <span className="flex items-center gap-1 text-success">
                 <Check className="size-3" aria-hidden="true" /> Saved
+              </span>
+            )}
+            {status.kind === 'removed' && (
+              <span className="flex items-center gap-1 text-success">
+                <Check className="size-3" aria-hidden="true" /> Removed
               </span>
             )}
           </div>
