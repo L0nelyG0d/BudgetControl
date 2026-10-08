@@ -1,5 +1,7 @@
 # Process
 
+## Frontend design
+- General  rontend design can be accessed at `_docs/design-system.md` file. If there is a task that requires changes in the frontend read the file first to follow the general guideline. If you have any questions regarding the design consulate with the user before adding changes yourself. Give several options to choose from and demonstrate how they would look.
 ## Tasks
 - Tasks are GitHub issues in `L0nelyG0d/BudgetControl`, one at a time
 - `_docs/tasks.md` is the backlog. Issue numbers match task numbers (task 4 = issue #4)
@@ -21,3 +23,6 @@
 ## Secrets
 - Never commit tokens, passwords, or connection strings. Keep `JWT_SECRET`, `DATABASE_URL`, and `TEST_DATABASE_URL` in environment variables or a git-ignored `.env`
 - Never paste a secret into a doc, an issue, or a commit message
+
+- PM - grooms a task before anyone implements it, follows _docs/team/pm.md
+
