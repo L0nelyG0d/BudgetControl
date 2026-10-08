@@ -1,4 +1,8 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { useState } from 'react'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
+import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 const links = [
@@ -10,6 +14,24 @@ const links = [
 
 /** Authenticated shell: nav bar plus the page content. */
 export function Layout() {
+  const { setUser } = useAuth()
+  const navigate = useNavigate()
+  const [loggingOut, setLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+
+  async function logout() {
+    setLoggingOut(true)
+    setLogoutError(null)
+    try {
+      await api('/api/auth/logout', { method: 'POST' })
+      setUser(null)
+      navigate('/login', { replace: true })
+    } catch {
+      setLogoutError('Could not log out. Check your connection and try again.')
+      setLoggingOut(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border bg-card">
@@ -33,7 +55,22 @@ export function Layout() {
               {l.label}
             </NavLink>
           ))}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => void logout()}
+            disabled={loggingOut}
+          >
+            Log out
+          </Button>
         </nav>
+        {logoutError && (
+          <p role="alert" className="mx-auto max-w-4xl px-4 pb-2 text-sm text-destructive">
+            {logoutError}
+          </p>
+        )}
       </header>
       <main className="mx-auto max-w-4xl px-4 py-6">
         <Outlet />
