@@ -11,3 +11,6 @@ adding issues to github downloading the necessary tool.txt
 # Secrets
 .env
 .env.*
+
+# Go build output
+/backend/budgetcontrol
