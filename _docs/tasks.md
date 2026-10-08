@@ -10,11 +10,11 @@ Description: Create the project under `frontend/` using Vite with the React + Ty
 
 ## 3. Neon database schema
 Goal: Create the PostgreSQL schema on Neon with all four tables.
-Description: Using the Neon console or migration SQL file, create `users`, `categories`, `expenses`, and `budgets` tables matching the schema in `_docs/plan.md`. Amounts are `BIGINT` whole tenge, `budgets.month` is a `DATE` with a `CHECK` that it is the 1st of the month, and `budgets` has a unique index on (user_id, category_id, month) using `NULLS NOT DISTINCT` (Postgres 15+). Seed the `categories` table with the default categories (Food, Transport, Housing, Entertainment, Health, Other). Commit the SQL file to `backend/db/schema.sql`.
+Description: Using the Neon console or migration SQL file, create `users`, `categories`, `expenses`, and `budgets` tables matching the schema in `_docs/plan.md`. Amounts are `BIGINT` whole tenge, `budgets.month` is a `DATE` with a `CHECK` that it is the 1st of the month, and `budgets` has a unique index on (user_id, category_id, month) using `NULLS NOT DISTINCT` (Postgres 15+). Seed the `categories` table with the default categories (Food, Transport, Housing, Entertainment, Health, Other). Emails are unique case-insensitively, category names are unique per user (case-insensitive), and amounts must be positive. Add an index on `expenses (user_id, date)`. Commit the SQL file to `backend/db/schema.sql`.
 
 ## 4. Backend: user registration endpoint
 Goal: Implement `POST /auth/register` that creates a new user.
-Description: Accept `email` and `password` in the request body, hash the password with bcrypt, insert a row into `users`, and return `201` with the new user's id and email. Reject passwords shorter than 8 characters with `400`. Return a clear error if the email is already taken. Write a test that covers the success, duplicate-email, and short-password cases.
+Description: Accept `email` and `password` in the request body, hash the password with bcrypt, insert a row into `users`, and return `201` with the new user's id and email. Emails are trimmed and lowercased. Reject passwords shorter than 8 characters with `400`. Return `409` if the email is already taken. This task also adds the `DATABASE_URL` connection (pgx pool) and the JSON `{"error": ...}` error format reused by later endpoints. Write a test that covers the success, duplicate-email, and short-password cases.
 
 ## 5. Backend: login endpoint and JWT middleware
 Goal: Implement login, logout, and current-user endpoints, and protect routes with a JWT middleware.
@@ -22,11 +22,11 @@ Description: `POST /auth/login` verifies the email/password against the database
 
 ## 6. Backend: categories endpoints
 Goal: Implement full category management behind auth.
-Description: `GET /categories` returns the authenticated user's custom categories merged with the global defaults (where `user_id IS NULL`). `POST /categories` creates a custom category (name + color). `PUT /categories/:id` renames or recolors a custom category. `DELETE /categories/:id` moves the category's expenses to the default "Other" category, then deletes the category and its budget rows (in one transaction). Default categories and other users' categories return `403` on `PUT` and `DELETE`. All endpoints require a valid JWT. Write tests for listing (including defaults), creating, updating, deleting with expenses reassigned to "Other", and the `403` cases.
+Description: `GET /categories` returns the authenticated user's custom categories merged with the global defaults (where `user_id IS NULL`). `POST /categories` creates a custom category (name + color). `PUT /categories/:id` renames or recolors a custom category. `DELETE /categories/:id` moves the category's expenses to the default "Other" category, then deletes the category and its budget rows (in one transaction). Default categories and other users' categories return `403` on `PUT` and `DELETE`. Names must be unique per user, case-insensitive, including against the defaults (`409`). All endpoints require a valid JWT. Write tests for listing (including defaults), creating, updating, deleting with expenses reassigned to "Other", and the `403` cases.
 
 ## 7. Backend: expenses endpoints
 Goal: Implement full CRUD for expenses behind auth.
-Description: Implement `GET /expenses`, `POST /expenses`, `GET /expenses/:id`, `PUT /expenses/:id`, and `DELETE /expenses/:id`. Each operation must be scoped to the authenticated user — users must never see or modify another user's expenses. Write tests covering create, list, update, and delete, plus an unauthorized-access case.
+Description: `GET /expenses` accepts an optional `?month=YYYY-MM` filter. Implement `GET /expenses`, `POST /expenses`, `GET /expenses/:id`, `PUT /expenses/:id`, and `DELETE /expenses/:id`. Each operation must be scoped to the authenticated user — users must never see or modify another user's expenses. Write tests covering create, list, update, and delete, plus an unauthorized-access case.
 
 ## 8. Backend: budgets endpoints
 Goal: Implement `GET /budgets` and `PUT /budgets` behind auth.
@@ -42,7 +42,7 @@ Description: Create `Register` and `Login` form components with controlled input
 
 ## 11. Frontend: expense list and add-expense form
 Goal: Build a page to view and log expenses.
-Description: Fetch and display the user's expenses from `GET /expenses` in a table (amount, category, date, note). Add a form above or in a modal to create a new expense via `POST /expenses`, with a category dropdown populated from `GET /categories`. Newly added expenses should appear in the list without a full page reload.
+Description: Fetch and display all of the user's expenses from `GET /expenses` in a table (amount, category, date, note). Add a form above or in a modal to create a new expense via `POST /expenses`, with a category dropdown populated from `GET /categories`. Newly added expenses should appear in the list without a full page reload.
 
 ## 12. Frontend: category management page
 Goal: Build a page to view, create, edit, and delete custom categories.
@@ -54,4 +54,20 @@ Description: Fetch the current month's budgets from `GET /budgets?month=<current
 
 ## 14. Frontend: dashboard with spending pie chart
 Goal: Build the dashboard that shows a spending breakdown for the current month.
-Description: Use Recharts through the shadcn `Chart` component (see `_docs/design-system.md`) and render a pie chart showing total spending per category for the current month, derived from the expenses list. Below the chart, show a summary table with each category's spent amount vs. its budget (if set) and highlight over-budget categories. All data comes from the existing `GET /expenses` and `GET /budgets` endpoints.
+Description: Use Recharts through the shadcn `Chart` component (see `_docs/design-system.md`) and render a pie chart showing total spending per category for the current month, derived from `GET /expenses?month=<current>`. Below the chart, show a summary table with each category's spent amount vs. its budget (if set) and highlight over-budget categories. All data comes from the existing `GET /expenses` and `GET /budgets` endpoints.
+
+## 15. Frontend: edit and delete expenses
+Goal: Let users edit and delete an expense from the expense list.
+Description: Follow-up to #11. Add edit and delete actions to each row on `/expenses`, using `PUT` and `DELETE /expenses/:id` from #7, with an in-page delete confirmation.
+
+## 16. Frontend: month picker for dashboard and budgets
+Goal: Let users view and set any month, not only the current one.
+Description: Follow-up to #13 and #14. Add a previous/next month picker to `/dashboard` and `/budgets` that drives the `?month=` parameter of the existing endpoints.
+
+## 17. Backend: rate-limit login attempts
+Goal: Slow down password guessing.
+Description: Follow-up to #5. After 5 failed logins for the same email or from the same IP within 15 minutes, `POST /auth/login` returns `429` with `Retry-After`; in-memory, no new dependency. The login form shows a message on `429`.
+
+## 18. Remove a budget (backend and frontend)
+Goal: Let users take a budget away again.
+Description: Follow-up to #8 and #13. Add `DELETE /budgets?month=YYYY-MM&category_id=<id>` (overall budget when `category_id` is omitted) and a remove action on `/budgets`.

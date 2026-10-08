@@ -29,6 +29,7 @@ A fullstack web application for tracking personal expenses with category breakdo
 ### Categories
 - Default categories: Food, Transport, Housing, Entertainment, Health, Other
 - Default categories are shared (`user_id` is null) and cannot be edited or deleted
+- Category names are unique per user, case-insensitive, and may not match a default name (`409`)
 - Users can create custom categories on top of defaults, and rename, recolor, or delete their own
 - Deleting a custom category moves its expenses to the default "Other" category, then deletes the category and its budget rows
 - Users can only change or delete their own categories (never another user's, never defaults)
@@ -51,7 +52,7 @@ A fullstack web application for tracking personal expenses with category breakdo
   - `POST /auth/login` — sets the `session` cookie
   - `POST /auth/logout` — clears the cookie
   - `GET /auth/me` — current user (id, email)
-  - `GET/POST /expenses`
+  - `GET/POST /expenses` — `GET` takes an optional `?month=YYYY-MM` filter
   - `GET/PUT/DELETE /expenses/:id`
   - `GET/POST /categories`
   - `PUT/DELETE /categories/:id` — custom categories only; defaults return `403`

@@ -9,10 +9,10 @@ Rules
 - Pre-approved frontend packages: those listed under "Approved packages" in `_docs/design-system.md`
 - Pre-approved Go modules: `github.com/jackc/pgx/v5`, `golang.org/x/crypto` (bcrypt), `github.com/golang-jwt/jwt/v5`. Everything else comes from the standard library: routing uses `net/http` patterns (no chi or other router)
 
-Documents
+Documents - look these up when relevant, don't load them all up front
 
+- `_docs/process.md` - how work is organized: tasks, acceptance criteria, commits, secrets, PM role. Read before starting or closing any task
 - `_docs/plan.md` - what the app does: features, endpoints, tables, money rules
 - `_docs/tasks.md` - the backlog, one task per GitHub issue
-- `_docs/process.md` - how work is organized
-- Before writing tests, read `_docs/testing-guidelines.md`
-- For anything touching the UI, read `_docs/design-system.md`
+- `_docs/testing-guidelines.md` - read before writing tests
+- `_docs/design-system.md` - read before anything touching the UI
