@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"budgetcontrol/api"
 )
 
 func TestHealth(t *testing.T) {
@@ -21,7 +23,7 @@ func TestHealth(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			rec := httptest.NewRecorder()
-			newMux().ServeHTTP(rec, httptest.NewRequest(tc.method, "/health", nil))
+			newMux(api.Deps{}).ServeHTTP(rec, httptest.NewRequest(tc.method, "/health", nil))
 			if rec.Code != tc.want {
 				t.Errorf("got %d, want %d", rec.Code, tc.want)
 			}

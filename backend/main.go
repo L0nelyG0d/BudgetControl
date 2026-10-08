@@ -1,19 +1,17 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+
+	"budgetcontrol/api"
+	"budgetcontrol/db"
 )
 
-func newMux() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", health)
-	return mux
-}
-
-func health(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
+func newMux(deps api.Deps) *http.ServeMux {
+	return api.NewRouter(deps)
 }
 
 func addr() string {
@@ -25,7 +23,17 @@ func addr() string {
 }
 
 func main() {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL is not set; set it to the PostgreSQL connection string")
+	}
+	pool, err := db.Connect(context.Background(), dbURL)
+	if err != nil {
+		log.Fatalf("database: %v", err)
+	}
+	defer pool.Close()
+
 	a := addr()
 	log.Printf("listening on %s", a)
-	log.Fatal(http.ListenAndServe(a, newMux()))
+	log.Fatal(http.ListenAndServe(a, newMux(api.Deps{DB: pool})))
 }
