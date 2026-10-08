@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, TriangleAlert } from 'lucide-react'
 import { Cell, Pie, PieChart } from 'recharts'
 import { api } from '@/lib/api'
@@ -15,8 +15,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { MonthPicker } from '@/components/MonthPicker'
+import { useMonth } from '@/features/month/month'
 import {
-  currentMonth,
   summarize,
   type Budget,
   type Category,
@@ -48,9 +49,12 @@ function Status({ remaining }: { remaining: number }) {
 
 export default function DashboardPage() {
   const [state, setState] = useState<State>({ status: 'loading' })
-  const month = currentMonth()
+  const [month, setMonth] = useMonth()
+  const latest = useRef(0)
+  const [attempt, setAttempt] = useState(0)
 
-  const load = useCallback(() => {
+  useEffect(() => {
+    const id = ++latest.current
     setState({ status: 'loading' })
     Promise.all([
       api<Expense[]>(`/api/expenses?month=${month}`),
@@ -58,27 +62,28 @@ export default function DashboardPage() {
       api<Budget[]>(`/api/budgets?month=${month}`),
     ])
       .then(([expenses, categories, budgets]) => {
+        if (id !== latest.current) return
         if (![expenses, categories, budgets].every(Array.isArray)) throw new Error('Unexpected server response')
         setState({ status: 'ready', summary: summarize(expenses, categories, budgets) })
       })
-      .catch((err: unknown) =>
+      .catch((err: unknown) => {
+        if (id !== latest.current) return
         setState({
           status: 'error',
           message: err instanceof Error ? err.message : 'Something went wrong.',
-        }),
-    )
-  }, [month])
+        })
+      })
+    return () => {
+      latest.current++
+    }
+  }, [month, attempt])
 
-  useEffect(() => {
-    load()
-  }, [load])
-
-  const heading = new Date(`${month}-01T00:00:00`).toLocaleString('en-US', { month: 'long', year: 'numeric' })
+  const load = () => setAttempt((n) => n + 1)
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Dashboard</h1>
-      <p className="text-sm text-muted-foreground">{heading}</p>
+      <MonthPicker month={month} onChange={setMonth} />
 
       {state.status === 'loading' && (
         <div className="space-y-4" role="status" aria-label="Loading dashboard">

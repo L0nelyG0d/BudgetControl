@@ -9,12 +9,14 @@ import ExpensesPage from '@/pages/ExpensesPage'
 import CategoriesPage from '@/pages/CategoriesPage'
 import BudgetsPage from '@/pages/BudgetsPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import { MonthProvider } from '@/features/month/month'
 import { Toaster } from '@/components/ui/sonner'
 
 // The single routes definition: to build a page, edit its file in src/pages/.
 function App() {
   return (
     <AuthProvider>
+      <MonthProvider>
       <Routes>
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route element={<PublicOnly />}>
@@ -31,6 +33,7 @@ function App() {
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      </MonthProvider>
       <Toaster />
     </AuthProvider>
   )

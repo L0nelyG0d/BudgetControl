@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { BudgetRow, type Budget } from '@/features/budgets/BudgetRow'
+import { MonthPicker } from '@/components/MonthPicker'
+import { useMonth } from '@/features/month/month'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,34 +15,28 @@ type State =
   | { status: 'error' }
   | { status: 'ready'; categories: Category[]; budgets: Budget[] }
 
-const MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
-
 export default function BudgetsPage() {
-  // Computed once per mount, in local time.
-  const [now] = useState(() => new Date())
-  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  const heading = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`
+  const [month, setMonth] = useMonth()
   const [state, setState] = useState<State>({ status: 'loading' })
-
-  const load = useCallback(async () => {
-    setState({ status: 'loading' })
-    try {
-      const [categories, budgets] = await Promise.all([
-        api<Category[]>('/api/categories'),
-        api<Budget[]>(`/api/budgets?month=${month}`),
-      ])
-      setState({ status: 'ready', categories: categories ?? [], budgets: budgets ?? [] })
-    } catch {
-      setState({ status: 'error' })
-    }
-  }, [month])
+  const latest = useRef(0)
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
-    void load()
-  }, [load])
+    const id = ++latest.current
+    setState({ status: 'loading' })
+    Promise.all([api<Category[]>('/api/categories'), api<Budget[]>(`/api/budgets?month=${month}`)])
+      .then(([categories, budgets]) => {
+        if (id !== latest.current) return
+        setState({ status: 'ready', categories: categories ?? [], budgets: budgets ?? [] })
+      })
+      .catch(() => {
+        if (id !== latest.current) return
+        setState({ status: 'error' })
+      })
+    return () => {
+      latest.current++
+    }
+  }, [month, attempt])
 
   const amountFor = (categoryId: number | null) =>
     state.status === 'ready'
@@ -51,7 +47,7 @@ export default function BudgetsPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold">Budgets</h1>
-        <h2 className="text-muted-foreground">{heading}</h2>
+        <MonthPicker month={month} onChange={setMonth} />
       </div>
 
       {state.status === 'loading' && (
@@ -66,7 +62,7 @@ export default function BudgetsPage() {
         <Card>
           <CardContent className="flex flex-col items-start gap-4">
             <p role="alert">Could not load your budgets. Check your connection and try again.</p>
-            <Button variant="outline" onClick={() => void load()}>
+            <Button variant="outline" onClick={() => setAttempt((n) => n + 1)}>
               Try again
             </Button>
           </CardContent>
