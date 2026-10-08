@@ -9,22 +9,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { todayISO, validateAmount, type Category, type Expense } from './expenses'
 
 export function ExpenseForm({
   categories,
-  onAdded,
+  expense,
+  onSaved,
+  onCancel,
 }: {
   categories: Category[]
-  onAdded: (expense: Expense) => void
+  /** When set, the form edits this expense instead of adding a new one. */
+  expense?: Expense
+  onSaved: (expense: Expense) => void
+  onCancel?: () => void
 }) {
-  const [amount, setAmount] = useState('')
+  const editing = expense !== undefined
+  const [amount, setAmount] = useState(expense ? String(expense.amount) : '')
   const [categoryId, setCategoryId] = useState(() =>
-    categories[0] ? String(categories[0].id) : '',
+    expense ? String(expense.category_id) : categories[0] ? String(categories[0].id) : '',
   )
-  const [date, setDate] = useState(todayISO)
-  const [note, setNote] = useState('')
+  const [date, setDate] = useState(expense ? expense.date.slice(0, 10) : todayISO)
+  const [note, setNote] = useState(expense?.note ?? '')
   const [pending, setPending] = useState(false)
   const [amountError, setAmountError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
@@ -44,19 +51,26 @@ export function ExpenseForm({
     setPending(true)
     try {
       const category = categories.find((c) => String(c.id) === categoryId)
-      const created = await api<Expense>('/api/expenses', {
-        method: 'POST',
+      const saved = await api<Expense>(
+        expense ? `/api/expenses/${expense.id}` : '/api/expenses',
+        {
+        method: expense ? 'PUT' : 'POST',
         body: {
           amount: Number(amount.trim()),
           category_id: category ? category.id : Number(categoryId),
           date,
           ...(note.trim() ? { note: note.trim() } : {}),
         },
-      })
-      onAdded(created)
-      setAmount('')
-      setNote('')
-      setSaved(true)
+        },
+      )
+      onSaved(saved)
+      if (editing) {
+        toast.success('Expense updated')
+      } else {
+        setAmount('')
+        setNote('')
+        setSaved(true)
+      }
     } catch (error) {
       setFormError(
         error instanceof ApiError && error.status === 400
@@ -76,7 +90,7 @@ export function ExpenseForm({
       noValidate
       className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4"
     >
-      <h2 className="text-base font-semibold">Add expense</h2>
+      <h2 className="text-base font-semibold">{editing ? 'Edit expense' : 'Add expense'}</h2>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex flex-col gap-2">
           <Label htmlFor="expense-amount">Amount, ₸</Label>
@@ -139,10 +153,21 @@ export function ExpenseForm({
           Expense added.
         </p>
       )}
-      <div>
+      <div className="flex gap-2">
         <Button type="submit" disabled={pending}>
-          {pending ? 'Adding…' : 'Add expense'}
+          {editing
+            ? pending
+              ? 'Saving…'
+              : 'Save changes'
+            : pending
+              ? 'Adding…'
+              : 'Add expense'}
         </Button>
+        {editing && (
+          <Button type="button" variant="outline" onClick={onCancel} disabled={pending}>
+            Cancel
+          </Button>
+        )}
       </div>
     </form>
   )

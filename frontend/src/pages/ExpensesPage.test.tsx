@@ -36,7 +36,7 @@ const postsTo = (fn: ReturnType<typeof mockFetch>) =>
 afterEach(() => vi.unstubAllGlobals())
 
 function rowTexts() {
-  return screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+  return screen.getAllByRole('row', { hidden: true }).slice(1).map((r) => r.textContent ?? '')
 }
 
 describe('ExpensesPage', () => {
@@ -49,7 +49,7 @@ describe('ExpensesPage', () => {
     expect(rows).toHaveLength(2)
     const first = within(rows[0]).getAllByRole('cell').map((c) => c.textContent)
     expect(first[0]).toMatch(/^1\s500\s₸$/)
-    expect(first.slice(1)).toEqual(['Food', '05.10.2026', 'Lunch'])
+    expect(first.slice(1, 4)).toEqual(['Food', '05.10.2026', 'Lunch'])
     expect(rows[1]).toHaveTextContent('01.10.2026')
   })
 
@@ -126,5 +126,89 @@ describe('ExpensesPage', () => {
     expect(screen.getByLabelText(/^Note/)).toHaveValue('Bus')
     expect(screen.getByRole('button', { name: 'Add expense' })).toBeEnabled()
     expect(rowTexts()).toHaveLength(2)
+  })
+
+  describe('edit and delete', () => {
+    const edited = { id: 1, category_id: 2, amount: 1800, date: '2026-10-05', note: 'Taxi', created_at: '2026-10-05T10:00:00Z' }
+    const withMutations =
+      (put?: Handler, del?: Handler): Handler =>
+      (url, init) => {
+        if (init?.method === 'PUT' && put) return put(url, init)
+        if (init?.method === 'DELETE' && del) return del(url, init)
+        return standard(existing)(url, init)
+      }
+    const callsWith = (fn: ReturnType<typeof mockFetch>, method: string) =>
+      fn.mock.calls.filter(([, init]) => init?.method === method)
+
+    it('edits an expense with a pre-filled form and updates the row without reloading', async () => {
+      const fetchMock = mockFetch(withMutations(() => json(200, edited)))
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      fireEvent.click(screen.getByRole('button', { name: /^Edit expense of 05\.10\.2026/ }))
+      expect(screen.getByLabelText(/^Amount/)).toHaveValue('1500')
+      expect(screen.getByLabelText('Date')).toHaveValue('2026-10-05')
+      expect(screen.getByLabelText(/^Note/)).toHaveValue('Lunch')
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '1800' } })
+      fireEvent.change(screen.getByLabelText(/^Note/), { target: { value: 'Taxi' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await screen.findByText('Taxi', { selector: 'td' })
+      const put = callsWith(fetchMock, 'PUT')[0]
+      expect(put[0]).toBe('/api/expenses/1')
+      expect(JSON.parse(String(put[1]?.body))).toMatchObject({ amount: 1800, category_id: 1, date: '2026-10-05', note: 'Taxi' })
+      expect(rowTexts()[0]).toMatch(/1\s800\s₸/)
+      expect(rowTexts()[0]).toContain('Transport')
+      expect(screen.getByRole('button', { name: 'Add expense' })).toBeInTheDocument()
+    })
+
+    it('validates the amount when editing', async () => {
+      const fetchMock = mockFetch(withMutations(() => json(200, edited)))
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      fireEvent.click(screen.getByRole('button', { name: /^Edit expense of 05\.10\.2026/ }))
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '12.5' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      expect(await screen.findByText(/whole number/)).toBeInTheDocument()
+      expect(callsWith(fetchMock, 'PUT')).toHaveLength(0)
+    })
+
+    it('shows an error and leaves the list unchanged when the save fails', async () => {
+      mockFetch(withMutations(() => json(500, { error: 'boom' })))
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      const before = rowTexts()
+      fireEvent.click(screen.getByRole('button', { name: /^Edit expense of 05\.10\.2026/ }))
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '1800' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('Something went wrong')
+      expect(rowTexts()).toEqual(before)
+    })
+
+    it('asks for confirmation in the page, then deletes and removes the row', async () => {
+      const confirmSpy = vi.fn(() => false)
+      vi.stubGlobal('confirm', confirmSpy)
+      const fetchMock = mockFetch(withMutations(undefined, () => Promise.resolve(new Response(null, { status: 204 }))))
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      fireEvent.click(screen.getByRole('button', { name: /^Delete expense of 05\.10\.2026/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      expect(dialog).toHaveTextContent('cannot be undone')
+      expect(callsWith(fetchMock, 'DELETE')).toHaveLength(0)
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete expense' }))
+      await vi.waitFor(() => expect(rowTexts()).toHaveLength(1))
+      expect(callsWith(fetchMock, 'DELETE')[0][0]).toBe('/api/expenses/1')
+      expect(rowTexts()[0]).toContain('01.10.2026')
+      expect(confirmSpy).not.toHaveBeenCalled()
+    })
+
+    it('keeps the row and shows an error when the delete fails', async () => {
+      mockFetch(withMutations(undefined, () => json(500, { error: 'boom' })))
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      fireEvent.click(screen.getByRole('button', { name: /^Delete expense of 05\.10\.2026/ }))
+      const dialog = await screen.findByRole('alertdialog')
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Delete expense' }))
+      expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not delete')
+      expect(rowTexts()).toHaveLength(2)
+    })
   })
 })
