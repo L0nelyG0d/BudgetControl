@@ -1,28 +1,30 @@
 # Process
 
-## Tasks
-- Tasks are GitHub issues in `L0nelyG0d/BudgetControl`, one at a time
-- `_docs/tasks.md` is the backlog. Issue numbers match task numbers (task 4 = issue #4)
-- Work in order, because later tasks depend on earlier ones. Do not start the next issue until the current one is closed
-- If `tasks.md` and an issue disagree, `tasks.md` is the source of truth. Tell the user, and update the issue with `gh issue edit`
-- A PM grooms a task before anyone implements it, following `_docs/team/pm.md`
+Tasks are GitHub issues in `L0nelyG0d/BudgetControl`. `_docs/tasks.md` is the backlog and the source of truth: issue numbers match task numbers (task 4 = issue #4). If the two disagree, tell the user and update the issue with `gh issue edit`.
 
-## Acceptance criteria
-- Read the issue's Goal and Acceptance criteria before starting
-- Read them again before closing, and check each criterion against the actual result
-- Close an issue only when its tests pass (`go test ./...` for backend, `npm test` for frontend) and `go test -race ./...` is clean for backend work
-- If something in the issue is unclear or conflicts with `_docs/plan.md`, ask before building
+## Roles
 
-## Frontend design
-- For any frontend change, read `_docs/design-system.md` first and follow it
-- If you have questions about the design, consult the user before changing anything. Give several options to choose from and demonstrate how they would look
+The main session is the orchestrator. It launches the roles below as subagents and does not groom, implement, or test itself.
 
-## Commits
-- Work directly on `main`. No branch or pull request per issue
-- Commit regularly: small commits that each leave the tests passing
-- Commit messages are short and in the imperative ("Add register endpoint"). Reference the issue (`Refs #4`), and use `Closes #4` on the last commit of the issue
-- Push only when the user asks
+- PM - grooms a task, follows `_docs/team/pm.md`
+- Engineer - implements one groomed task, follows `_docs/team/software-engineer.md`
+- QA - checks the result against the acceptance criteria, follows `_docs/team/qa-engineer.md`
 
-## Secrets
-- Never commit tokens, passwords, or connection strings. Keep `JWT_SECRET`, `DATABASE_URL`, and `TEST_DATABASE_URL` in environment variables or a git-ignored `.env`
-- Never paste a secret into a doc, an issue, or a commit message
+## Lifecycle
+
+1. Pick the next open issue from the backlog, in order (later tasks depend on earlier ones)
+2. PM grooms it
+3. Engineer implements it
+4. If the task contradicts itself. Work with the PM to find a suitable solution. If the solution was not found leave it at the mock stage comment on the issue and continue working
+5. QA verifies it against the issue's acceptance criteria
+6. On FAIL, back to step 3 with the QA comment as input
+7. On PASS, the orchestrator closes the issue
+8. Repeat until the backlog is empty
+
+
+## Rules
+
+- Do not skip step 2 or start the next issue before the current one is closed
+- The engineer does not close the issue. QA does not fix code, it only outputs PASS or FAIL
+- Close an issue only after QA outputs PASS with the tests green: `go test ./...` and `go test -race ./...` for backend work, `npm test` for frontend work
+- If an issue is unclear or conflicts with `_docs/plan.md`, ask the user before building
