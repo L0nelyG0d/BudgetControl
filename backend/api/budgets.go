@@ -24,7 +24,7 @@ type budgetRequest struct {
 func monthParam(w http.ResponseWriter, r *http.Request) (string, bool) {
 	m := r.URL.Query().Get("month")
 	t, err := time.Parse("2006-01", m)
-	if err != nil || t.Format("2006-01") != m {
+	if err != nil || t.Year() < 1 || t.Format("2006-01") != m {
 		httpx.Error(w, http.StatusBadRequest, "month is required in YYYY-MM format")
 		return "", false
 	}

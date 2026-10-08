@@ -72,7 +72,7 @@ func TestBudgetsEmptyAndBadMonth(t *testing.T) {
 	if got := getBudgets(t, h, c, "2026-10"); len(got) != 0 {
 		t.Errorf("empty month: got %v", got)
 	}
-	for _, m := range []string{"", "2026", "2026-13", "2026-1", "2026-10-01", "abc", "2026-00"} {
+	for _, m := range []string{"", "2026", "2026-13", "2026-1", "2026-10-01", "abc", "2026-00", "0000-01", "0000-12"} {
 		t.Run("month="+m, func(t *testing.T) {
 			if rec := do(h, "GET", "/budgets?month="+m, "", c); rec.Code != 400 {
 				t.Errorf("GET: got %d, want 400", rec.Code)
@@ -81,6 +81,12 @@ func TestBudgetsEmptyAndBadMonth(t *testing.T) {
 				t.Errorf("PUT: got %d, want 400", rec.Code)
 			}
 		})
+	}
+	if rec := do(h, "PUT", "/budgets?month=0001-01", `{"amount":1000}`, c); rec.Code != 200 {
+		t.Errorf("year 1 PUT: got %d, want 200", rec.Code)
+	}
+	if got := getBudgets(t, h, c, "0001-01"); len(got) != 1 {
+		t.Errorf("year 1 GET: %v", got)
 	}
 	if rec := do(h, "GET", "/budgets", "", c); rec.Code != 400 {
 		t.Errorf("missing month: got %d, want 400", rec.Code)

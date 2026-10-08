@@ -229,6 +229,9 @@ func TestExpenseList(t *testing.T) {
 		{"bad format", "/expenses?month=2026-1", nil, 400},
 		{"full date", "/expenses?month=2026-10-01", nil, 400},
 		{"empty month param", "/expenses?month=", nil, 400},
+		{"year zero january", "/expenses?month=0000-01", nil, 400},
+		{"year zero december", "/expenses?month=0000-12", nil, 400},
+		{"year one", "/expenses?month=0001-01", []int64{}, 200},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

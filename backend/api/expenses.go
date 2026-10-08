@@ -148,7 +148,7 @@ func (h *Handler) listExpenses(w http.ResponseWriter, r *http.Request) {
 	args := []any{UserIDFrom(r)}
 	if m := r.URL.Query().Get("month"); r.URL.Query().Has("month") {
 		t, err := time.Parse("2006-01", m)
-		if err != nil || t.Format("2006-01") != m {
+		if err != nil || t.Year() < 1 || t.Format("2006-01") != m {
 			httpx.Error(w, http.StatusBadRequest, "month must be in YYYY-MM format")
 			return
 		}
