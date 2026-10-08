@@ -39,7 +39,8 @@ describe('App routing', () => {
       '/api/auth/me',
       expect.objectContaining({ credentials: 'include' }),
     )
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // The guard asks /api/auth/me once; the page itself may fetch its own data.
+    expect(fetchMock.mock.calls.filter((call: unknown[]) => call[0] === '/api/auth/me')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'Expenses' })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('link', { name: 'Budgets' })).not.toHaveAttribute('aria-current')
     for (const name of ['Dashboard', 'Categories', 'Budgets']) {

@@ -9,6 +9,7 @@ import ExpensesPage from '@/pages/ExpensesPage'
 import CategoriesPage from '@/pages/CategoriesPage'
 import BudgetsPage from '@/pages/BudgetsPage'
 import NotFoundPage from '@/pages/NotFoundPage'
+import { Toaster } from '@/components/ui/sonner'
 
 // The single routes definition: to build a page, edit its file in src/pages/.
 function App() {
@@ -30,6 +31,7 @@ function App() {
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
+      <Toaster />
     </AuthProvider>
   )
 }
