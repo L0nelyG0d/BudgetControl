@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"time"
 
 	"budgetcontrol/httpx"
@@ -109,4 +110,46 @@ func (h *Handler) setBudget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) deleteBudget(w http.ResponseWriter, r *http.Request) {
+	month, ok := monthParam(w, r)
+	if !ok {
+		return
+	}
+	// Omitted category_id means the overall budget.
+	var categoryID *int64
+	if q := r.URL.Query(); q.Has("category_id") {
+		id, err := strconv.ParseInt(q.Get("category_id"), 10, 64)
+		if err != nil || id <= 0 {
+			httpx.Error(w, http.StatusBadRequest, "category_id must be a positive whole number")
+			return
+		}
+		var visible bool
+		err = h.deps.DB.QueryRow(r.Context(),
+			`SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1 AND (user_id IS NULL OR user_id = $2))`,
+			id, UserIDFrom(r)).Scan(&visible)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if !visible {
+			httpx.Error(w, http.StatusBadRequest, "category_id must be a default category or one of your own")
+			return
+		}
+		categoryID = &id
+	}
+	tag, err := h.deps.DB.Exec(r.Context(),
+		`DELETE FROM budgets
+		 WHERE user_id = $1 AND month = $2 AND category_id IS NOT DISTINCT FROM $3::bigint`,
+		UserIDFrom(r), month, categoryID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.Error(w, http.StatusNotFound, "budget not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -201,3 +201,88 @@ func TestBudgetsInvalidBody(t *testing.T) {
 		t.Errorf("second user's budgets: %v", got)
 	}
 }
+
+func TestBudgetsDelete(t *testing.T) {
+	pool := testutil.Pool(t)
+	h := api.NewRouter(testutil.Deps(pool))
+	uid, _, c := testutil.NewUser(t, pool)
+	otherID, _, otherC := testutil.NewUser(t, pool)
+	food := defaultCategory(t, pool)
+	own := ownCategory(t, pool, uid)
+	otherCat := ownCategory(t, pool, otherID)
+
+	put := func(cc *http.Cookie, month, body string) {
+		t.Helper()
+		if rec := do(h, "PUT", "/budgets?month="+month, body, cc); rec.Code != 200 {
+			t.Fatalf("PUT %s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	catBody := fmt.Sprintf(`{"category_id":%d,"amount":100}`, food)
+	put(c, "2026-10", catBody)
+	put(c, "2026-10", fmt.Sprintf(`{"category_id":%d,"amount":200}`, own))
+	put(c, "2026-10", `{"amount":300}`)
+	put(c, "2026-11", catBody)
+	put(otherC, "2026-10", catBody)
+	put(otherC, "2026-10", `{"amount":999}`)
+
+	del := func(cc *http.Cookie, path string) int {
+		return do(h, "DELETE", path, "", cc).Code
+	}
+	// Success, then not found the second time.
+	if got := del(c, fmt.Sprintf("/budgets?month=2026-10&category_id=%d", food)); got != 204 {
+		t.Fatalf("delete category budget: %d", got)
+	}
+	if got := del(c, fmt.Sprintf("/budgets?month=2026-10&category_id=%d", food)); got != 404 {
+		t.Errorf("delete again: %d, want 404", got)
+	}
+	// Overall: omitted category_id.
+	if got := del(c, "/budgets?month=2026-10"); got != 204 {
+		t.Fatalf("delete overall: %d", got)
+	}
+	if got := del(c, "/budgets?month=2026-10"); got != 404 {
+		t.Errorf("delete overall again: %d, want 404", got)
+	}
+	// Remaining: own category in Oct, food in Nov.
+	got := getBudgets(t, h, c, "2026-10")
+	if len(got) != 1 || got[0].CategoryID == nil || *got[0].CategoryID != own {
+		t.Errorf("october after delete: %v", got)
+	}
+	if nov := getBudgets(t, h, c, "2026-11"); len(nov) != 1 {
+		t.Errorf("november changed: %v", nov)
+	}
+	// Month with nothing, valid category without a budget.
+	if got := del(c, fmt.Sprintf("/budgets?month=2026-12&category_id=%d", food)); got != 404 {
+		t.Errorf("nothing to delete: %d, want 404", got)
+	}
+	// Another user's data is untouched and not deletable.
+	if got := getBudgets(t, h, otherC, "2026-10"); len(got) != 2 {
+		t.Errorf("other user's budgets changed: %v", got)
+	}
+	if got := del(c, fmt.Sprintf("/budgets?month=2026-10&category_id=%d", otherCat)); got != 400 {
+		t.Errorf("other user's category: %d, want 400", got)
+	}
+	// Overall of one user does not delete the other's.
+	if got := del(otherC, "/budgets?month=2026-10"); got != 204 {
+		t.Errorf("other user's own overall: %d", got)
+	}
+	if got := getBudgets(t, h, otherC, "2026-10"); len(got) != 1 {
+		t.Errorf("other user's remaining: %v", got)
+	}
+	// Bad input and auth.
+	for _, p := range []string{
+		"/budgets", "/budgets?month=", "/budgets?month=2026-13", "/budgets?month=0000-01",
+		"/budgets?month=2026-10&category_id=", "/budgets?month=2026-10&category_id=abc",
+		"/budgets?month=2026-10&category_id=0", "/budgets?month=2026-10&category_id=-1",
+		"/budgets?month=2026-10&category_id=1.5", "/budgets?month=2026-10&category_id=999999999",
+	} {
+		if got := del(c, p); got != 400 {
+			t.Errorf("DELETE %s: %d, want 400", p, got)
+		}
+	}
+	if rec := do(h, "DELETE", "/budgets?month=2026-10", ""); rec.Code != 401 {
+		t.Errorf("no cookie: %d, want 401", rec.Code)
+	}
+	if n := budgetRows(t, pool, uid); n != 2 {
+		t.Errorf("rows: %d, want 2", n)
+	}
+}
