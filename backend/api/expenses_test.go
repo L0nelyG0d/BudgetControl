@@ -128,6 +128,11 @@ func TestExpenseCreate(t *testing.T) {
 	if e.Note != nil || e.Date != "2099-12-31" || e.CategoryID != own {
 		t.Errorf("unexpected expense %+v", e)
 	}
+	for _, d := range []string{"0001-01-01", "2028-02-29", "9999-12-31"} {
+		if rec := do(h, "POST", "/expenses", expBody(10, def, d, ""), c); rec.Code != 201 {
+			t.Errorf("date %s: %d %s", d, rec.Code, rec.Body)
+		}
+	}
 	rec := do(h, "POST", "/expenses", expBody(10, def, "2024-02-29", strings.Repeat("я", 500)), c)
 	if rec.Code != 201 {
 		t.Errorf("500-char note: %d %s", rec.Code, rec.Body)
@@ -159,6 +164,8 @@ func TestExpenseValidation(t *testing.T) {
 		{"not a date", expBody(5, def, "yesterday", "")},
 		{"impossible date", expBody(5, def, "2026-02-30", "")},
 		{"non-leap Feb 29", expBody(5, def, "2025-02-29", "")},
+		{"year zero", expBody(5, def, "0000-01-01", "")},
+		{"year zero end", expBody(5, def, "0000-12-31", "")},
 		{"wrong format", expBody(5, def, "2026-1-5", "")},
 		{"note too long", expBody(5, def, "2026-10-08", strings.Repeat("a", 501))},
 		{"malformed JSON", `{`},

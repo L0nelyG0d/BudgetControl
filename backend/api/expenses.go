@@ -78,7 +78,7 @@ func (h *Handler) readExpense(w http.ResponseWriter, r *http.Request) (expenseIn
 	if req.Date == nil {
 		return bad("date is required (YYYY-MM-DD)")
 	}
-	if t, err := time.Parse("2006-01-02", *req.Date); err != nil || t.Format("2006-01-02") != *req.Date {
+	if t, err := time.Parse("2006-01-02", *req.Date); err != nil || t.Year() < 1 || t.Format("2006-01-02") != *req.Date {
 		return bad("date must be a real calendar date in YYYY-MM-DD format")
 	}
 	in.date = *req.Date
