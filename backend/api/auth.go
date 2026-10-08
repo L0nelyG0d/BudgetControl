@@ -159,6 +159,12 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip, now := clientIP(r), h.deps.now()
+	if wait := h.loginLimit.check(email, ip, now); wait > 0 {
+		writeTooManyAttempts(w, wait)
+		return
+	}
+
 	var id int64
 	var hash string
 	err := h.deps.DB.QueryRow(r.Context(),
@@ -172,11 +178,13 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	cmpErr := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password))
 	if !known || cmpErr != nil {
+		h.loginLimit.fail(email, ip, now)
 		httpx.Error(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
 
-	c, err := NewSessionCookie(h.deps.JWTSecret, id, h.deps.now(), h.deps.Production)
+	h.loginLimit.succeed(email)
+	c, err := NewSessionCookie(h.deps.JWTSecret, id, now, h.deps.Production)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal error")
 		return

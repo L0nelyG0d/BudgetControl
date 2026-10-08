@@ -23,7 +23,8 @@ type Deps struct {
 
 // Handler groups handlers around shared dependencies.
 type Handler struct {
-	deps Deps
+	deps       Deps
+	loginLimit *loginLimiter
 }
 
 // NewRouter returns the application mux with all routes registered.
@@ -32,7 +33,7 @@ type Handler struct {
 // file (stubs for categories, expenses and budgets already exist) and wrap
 // every protected handler with h.requireAuth.
 func NewRouter(deps Deps) *http.ServeMux {
-	h := &Handler{deps: deps}
+	h := &Handler{deps: deps, loginLimit: newLoginLimiter()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", h.health)
 	h.registerAuthRoutes(mux)
