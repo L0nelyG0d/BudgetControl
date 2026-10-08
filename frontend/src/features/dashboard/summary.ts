@@ -57,7 +57,7 @@ export function summarize(expenses: Expense[], categories: Category[], budgets: 
   for (const [id, s] of spent) {
     if (known.has(id)) continue
     const b = budgetBy.get(id) ?? null
-    rows.push({ categoryId: id, name: 'Uncategorized', color: '#94A3B8', spent: s, budget: b, remaining: b === null ? null : b - s })
+    rows.push({ categoryId: id, name: 'Uncategorized', color: 'var(--muted-foreground)', spent: s, budget: b, remaining: b === null ? null : b - s })
   }
   rows.sort((a, b) => b.spent - a.spent || a.name.localeCompare(b.name))
 

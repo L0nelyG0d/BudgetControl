@@ -132,7 +132,7 @@ function Ready({ summary }: { summary: Summary }) {
                   <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />
                   <Pie data={spending} dataKey="spent" nameKey="name" innerRadius={50} isAnimationActive={false}>
                     {spending.map((r) => (
-                      <Cell key={r.categoryId} fill={r.color} />
+                      <Cell key={r.categoryId} fill={r.color} style={{ fill: r.color }} />
                     ))}
                   </Pie>
                 </PieChart>
