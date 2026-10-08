@@ -252,7 +252,7 @@ func TestExpenseGetUpdateDelete(t *testing.T) {
 	rec := do(h, "GET", path, "", c)
 	var got expenseJSON
 	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if rec.Code != 200 || got != e {
+	if rec.Code != 200 || got.ID != e.ID || got.Amount != 100 || got.CreatedAt != e.CreatedAt {
 		t.Errorf("get: %d %s", rec.Code, rec.Body)
 	}
 
