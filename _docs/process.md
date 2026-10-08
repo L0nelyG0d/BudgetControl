@@ -12,11 +12,11 @@
 - Close an issue only when its tests pass (`go test ./...` for backend, `npm test` for frontend) and `go test -race ./...` is clean for backend work
 - If something in the issue is unclear or conflicts with `_docs/plan.md`, ask before building
 
-## Branches and commits
-- One branch per issue, named `<number>-<short-slug>` (e.g. `4-register-endpoint`). Do not commit to `main` directly
+## Commits
+- Work directly on `main`. No branch or pull request per issue
 - Commit regularly: small commits that each leave the tests passing
-- Commit messages are short and in the imperative ("Add register endpoint"). Reference the issue (`Refs #4`)
-- Open a pull request per issue with `Closes #4` in the description, so merging closes the issue
+- Commit messages are short and in the imperative ("Add register endpoint"). Reference the issue (`Refs #4`), and use `Closes #4` on the last commit of the issue
+- Push only when the user asks
 
 ## Secrets
 - Never commit tokens, passwords, or connection strings. Keep `JWT_SECRET`, `DATABASE_URL`, and `TEST_DATABASE_URL` in environment variables or a git-ignored `.env`

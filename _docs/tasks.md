@@ -6,7 +6,7 @@ Description: Initialize a Go module under `backend/`, add a minimal HTTP server 
 
 ## 2. React frontend skeleton with a passing test
 Goal: Scaffold an empty React app (Vite) that renders and has one passing test.
-Description: Create the project under `frontend/` using Vite with the React + TypeScript template. Set up Tailwind CSS v4 and run `shadcn init` with the indigo theme and CSS variables, following `_docs/design-system.md` (light and dark tokens in `src/index.css`). Replace the default page with a bare `<App />` component that renders a heading, and add one Vitest/Testing Library test that asserts the heading is present. No routing, API calls, or other shadcn components yet.
+Description: Create the project under `frontend/` using Vite with the React + TypeScript template. Set up Tailwind CSS v4 and run `shadcn init` with the indigo theme and CSS variables, following `_docs/design-system.md` (light and dark tokens in `src/index.css`). Replace the default page with a bare `<App />` component that renders a heading, and add one Vitest/Testing Library test that asserts the heading is present. Configure the Vite dev server to proxy `/api` to `http://localhost:8080`, stripping the prefix, so the session cookie is same-origin. No routing, API calls, or other shadcn components yet.
 
 ## 3. Neon database schema
 Goal: Create the PostgreSQL schema on Neon with all four tables.
@@ -14,11 +14,11 @@ Description: Using the Neon console or migration SQL file, create `users`, `cate
 
 ## 4. Backend: user registration endpoint
 Goal: Implement `POST /auth/register` that creates a new user.
-Description: Accept `email` and `password` in the request body, hash the password with bcrypt, insert a row into `users`, and return `201` with the new user's id and email. Return a clear error if the email is already taken. Write a test that covers both the success and duplicate-email cases.
+Description: Accept `email` and `password` in the request body, hash the password with bcrypt, insert a row into `users`, and return `201` with the new user's id and email. Reject passwords shorter than 8 characters with `400`. Return a clear error if the email is already taken. Write a test that covers the success, duplicate-email, and short-password cases.
 
 ## 5. Backend: login endpoint and JWT middleware
-Goal: Implement `POST /auth/login` and protect routes with a JWT middleware.
-Description: Verify the email/password against the database, sign a JWT containing the user id and an expiry, and return it in the response body. Add middleware that reads the `Authorization: Bearer <token>` header, validates the JWT, and attaches the user id to the request context. Write tests for valid login, wrong password, and a protected route accessed without a token.
+Goal: Implement login, logout, and current-user endpoints, and protect routes with a JWT middleware.
+Description: `POST /auth/login` verifies the email/password against the database, signs a JWT containing the user id and a 7-day expiry, and sets it in an httpOnly `session` cookie (`SameSite=Lax`, `Secure` in production). The token is never returned in the response body. `POST /auth/logout` clears the cookie. `GET /auth/me` returns the current user's id and email. Add middleware that reads the `session` cookie, validates the JWT, and attaches the user id to the request context. The signing secret comes from the `JWT_SECRET` environment variable. Write tests for valid login (cookie set), wrong password, logout, `/auth/me`, and a protected route accessed without a cookie.
 
 ## 6. Backend: categories endpoints
 Goal: Implement full category management behind auth.
@@ -34,11 +34,11 @@ Description: `GET` returns all budget rows for the authenticated user for a give
 
 ## 9. Frontend: app shell with routing
 Goal: Set up React Router with placeholder pages and a persistent nav bar.
-Description: Install React Router and define routes for `/login`, `/register`, `/dashboard`, `/expenses`, `/categories`, and `/budgets`. Each route renders a minimal placeholder component (just a heading). Add a nav bar that links between the authenticated pages and a simple auth guard that redirects unauthenticated users to `/login`. No real API calls yet.
+Description: Install React Router and define routes for `/login`, `/register`, `/dashboard`, `/expenses`, `/categories`, and `/budgets`. Each route renders a minimal placeholder component (just a heading). Add a nav bar that links between the authenticated pages and an auth guard that redirects unauthenticated users to `/login`. The guard asks `GET /api/auth/me` (with `credentials: 'include'`) whether a session exists; in tests, mock `fetch`. No other API calls yet.
 
 ## 10. Frontend: register and login pages
 Goal: Build working auth forms connected to the backend API.
-Description: Create `Register` and `Login` form components with controlled inputs for email and password. On submit, call `POST /auth/register` or `POST /auth/login`, store the returned JWT in `localStorage`, and redirect to `/dashboard`. Display inline error messages for failed requests (wrong password, email taken, etc.).
+Description: Create `Register` and `Login` form components with controlled inputs for email and password. On submit, call `POST /api/auth/register` or `POST /api/auth/login` with `credentials: 'include'`, so the browser keeps the `session` cookie (never store the token in `localStorage`), and redirect to `/dashboard`. Add a logout button in the nav that calls `POST /api/auth/logout`. Display inline error messages for failed requests (wrong password, email taken, password too short, etc.).
 
 ## 11. Frontend: expense list and add-expense form
 Goal: Build a page to view and log expenses.

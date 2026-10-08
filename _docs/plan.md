@@ -7,14 +7,17 @@ A fullstack web application for tracking personal expenses with category breakdo
 - **Frontend:** React
 - **Backend:** Go (REST API)
 - **Database:** Neon (PostgreSQL)
-- **Auth:** Email/password with JWT
+- **Auth:** Email/password with JWT in an httpOnly cookie
 
 ## Features
 
 ### Authentication
 - Register with email + password
 - Login with email + password
-- JWT-based session management
+- Passwords must be at least 8 characters
+- JWT-based session management. The JWT is stored in an httpOnly cookie named `session` (`SameSite=Lax`, `Secure` in production, 7-day lifetime), never in `localStorage` and never returned in a response body
+- `POST /auth/logout` clears the cookie. `GET /auth/me` returns the current user, so the frontend can tell whether someone is logged in
+- In development, Vite proxies `/api` to the Go server (stripping the prefix), so the cookie is same-origin and no CORS setup is needed
 
 ### Expense Logging
 - Log an expense with:
@@ -45,7 +48,9 @@ A fullstack web application for tracking personal expenses with category breakdo
 - JWT authentication middleware
 - REST endpoints:
   - `POST /auth/register`
-  - `POST /auth/login`
+  - `POST /auth/login` — sets the `session` cookie
+  - `POST /auth/logout` — clears the cookie
+  - `GET /auth/me` — current user (id, email)
   - `GET/POST /expenses`
   - `GET/PUT/DELETE /expenses/:id`
   - `GET/POST /categories`

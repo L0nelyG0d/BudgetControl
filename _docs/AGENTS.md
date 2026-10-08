@@ -6,7 +6,8 @@
 Rules
 
 - Dependencies are tracked in `go.mod` (backend) and `frontend/package.json` (frontend). Do not add one without asking
-- Exception: the packages listed under "Approved packages" in `_docs/design-system.md` are pre-approved for the frontend
+- Pre-approved frontend packages: those listed under "Approved packages" in `_docs/design-system.md`
+- Pre-approved Go modules: `github.com/jackc/pgx/v5`, `golang.org/x/crypto` (bcrypt), `github.com/golang-jwt/jwt/v5`. Everything else comes from the standard library: routing uses `net/http` patterns (no chi or other router)
 
 Documents
 
