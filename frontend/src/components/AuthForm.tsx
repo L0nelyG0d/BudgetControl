@@ -10,6 +10,7 @@ const MIN_PASSWORD_LENGTH = 8
 
 function messageFor(err: unknown, mode: 'login' | 'register'): string {
   if (err instanceof ApiError) {
+    if (err.status === 429) return 'Too many attempts. Try again in a few minutes.'
     if (err.status === 401) return 'Wrong email or password. Check them and try again.'
     if (err.status === 409) return 'This email is already registered. Try logging in instead.'
     if (err.status === 400) return err.message
