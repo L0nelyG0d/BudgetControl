@@ -29,10 +29,25 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// ApplySchema runs schema.sql against the pool.
+// schemaLockID is the advisory lock that serializes schema application, so
+// several processes (e.g. parallel test packages) can apply it at once.
+const schemaLockID = 727001
+
+// ApplySchema runs schema.sql against the pool. It is safe to call
+// concurrently from several processes.
 func ApplySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := pool.Exec(ctx, Schema)
-	return err
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, Schema); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // IsUniqueViolation reports whether err is a PostgreSQL unique_violation.
