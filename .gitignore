@@ -14,3 +14,5 @@ adding issues to github downloading the necessary tool.txt
 
 # Go build output
 /backend/budgetcontrol
+.neon
+node_modules/

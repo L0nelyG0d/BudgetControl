@@ -71,3 +71,19 @@ Description: Follow-up to #5. After 5 failed logins for the same email or from t
 ## 18. Remove a budget (backend and frontend)
 Goal: Let users take a budget away again.
 Description: Follow-up to #8 and #13. Add `DELETE /budgets?month=YYYY-MM&category_id=<id>` (overall budget when `category_id` is omitted) and a remove action on `/budgets`.
+
+## 19. Backend: cap expense and budget amounts
+Goal: Reject absurd amounts so monthly sums cannot overflow and the frontend never loses precision.
+Description: Follow-up to #7 and #8. `POST/PUT /expenses` and `PUT /budgets` return `400` when `amount` is above 1,000,000,000,000 (one trillion tenge, well under 2^53). Document the limit in `_docs/plan.md`. Exactly 1,000,000,000,000 is accepted, one more is rejected; the limit is one shared constant. Out of scope: frontend validation, DB CHECK constraint.
+
+## 20. Backend: login rate limit behind a proxy
+Goal: Make the login limiter usable behind a reverse proxy without blocking everyone.
+Description: Follow-up to #17. Add an opt-in `TRUSTED_PROXY=true` environment variable; when set, the limiter takes the client IP from the last `X-Forwarded-For` entry, otherwise it keeps using the connection's remote address and ignores the header. No new dependency. Document the variable in `_docs/plan.md`. Only the exact value `true` enables it; a missing, empty, or invalid last entry falls back to the remote address. plan.md has no rate-limit section yet, so add one. Out of scope: proxy allowlist or hop count.
+
+## 21. Backend: apply the schema on startup
+Goal: A fresh database works without a manual step.
+Description: Follow-up to #3 and #4. `main.go` calls `db.ApplySchema` after connecting, so registering against an empty database no longer fails with a 500. Also log the underlying error when a handler returns `500`, without logging request bodies or secrets. If `ApplySchema` fails, log `apply schema: <err>` and exit non-zero before listening. Every 500 site logs the error, method, and path (no query string, headers, or cookies) through one shared helper. Out of scope: versioned migrations, structured logging.
+
+## 22. Backend: consistent 400 for non-numeric ids
+Goal: Make a malformed id behave the same on every route.
+Description: Follow-up to #6 and #7. `GET/PUT/DELETE /expenses/{id}` with a non-numeric id returns `400` like the category routes do; a numeric id that does not exist still returns `404`. Update `_docs/plan.md` and the tests. The id is checked before the body is read; `0`, negative, and nonexistent numeric ids and other users' expenses stay `404`; the response body is `invalid expense id`.
