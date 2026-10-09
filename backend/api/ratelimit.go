@@ -12,22 +12,26 @@ import (
 )
 
 const (
-	// loginMaxFailures is how many failed logins are allowed per window; the
-	// next attempt is answered with 429.
-	loginMaxFailures = 5
+	// loginMaxFailuresPerEmail and loginMaxFailuresPerIP are how many failed
+	// logins are allowed per window for one email and for one client IP; the
+	// next attempt is answered with 429. The IP limit is higher so shared
+	// networks (office, campus, mobile) do not lock each other out.
+	loginMaxFailuresPerEmail = 5
+	loginMaxFailuresPerIP    = 20
 	// loginWindow is how long a failure counts against its email and IP.
 	loginWindow = 15 * time.Minute
 )
 
 // failureLimiter counts recent failures per key (in memory, single server).
-// A key is blocked once it has loginMaxFailures failures in the last window.
+// A key is blocked once it has limit failures in the last window.
 type failureLimiter struct {
+	limit    int
 	mu       sync.Mutex
 	failures map[string][]time.Time // oldest first
 }
 
-func newFailureLimiter() *failureLimiter {
-	return &failureLimiter{failures: map[string][]time.Time{}}
+func newFailureLimiter(limit int) *failureLimiter {
+	return &failureLimiter{limit: limit, failures: map[string][]time.Time{}}
 }
 
 // prune drops expired failures for key; callers hold mu.
@@ -51,11 +55,11 @@ func (l *failureLimiter) retryAfter(key string, now time.Time) time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	times := l.prune(key, now)
-	if len(times) < loginMaxFailures {
+	if len(times) < l.limit {
 		return 0
 	}
 	// Unblocked when the oldest counted failure leaves the window.
-	return times[len(times)-loginMaxFailures].Add(loginWindow).Sub(now)
+	return times[len(times)-l.limit].Add(loginWindow).Sub(now)
 }
 
 func (l *failureLimiter) fail(key string, now time.Time) {
@@ -88,7 +92,10 @@ type loginLimiter struct {
 }
 
 func newLoginLimiter() *loginLimiter {
-	return &loginLimiter{byEmail: newFailureLimiter(), byIP: newFailureLimiter()}
+	return &loginLimiter{
+		byEmail: newFailureLimiter(loginMaxFailuresPerEmail),
+		byIP:    newFailureLimiter(loginMaxFailuresPerIP),
+	}
 }
 
 // clientIP is the client address used for the per-IP login limit.

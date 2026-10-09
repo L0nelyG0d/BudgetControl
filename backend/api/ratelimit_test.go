@@ -87,9 +87,15 @@ func TestLoginRateLimitByEmail(t *testing.T) {
 	}
 }
 
+const ipLimit = 20 // failed logins per client IP per window
+
 func TestLoginRateLimitByIP(t *testing.T) {
-	h, clock, _ := newLimitedRouter(t)
-	for i := 0; i < 5; i++ {
+	h, clock, pool := newLimitedRouter(t)
+	good := testutil.UniqueEmail("ipok")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	for i := 0; i < ipLimit; i++ {
 		// A different unknown email each time: only the IP counter fills up.
 		rec := loginFrom(h, "192.0.2.77", testutil.UniqueEmail("ip"), "wrong")
 		if rec.Code != 401 {
@@ -97,14 +103,175 @@ func TestLoginRateLimitByIP(t *testing.T) {
 		}
 	}
 	if rec := loginFrom(h, "192.0.2.77", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 429 {
-		t.Fatalf("same IP: got %d, want 429", rec.Code)
+		t.Fatalf("21st from same IP: got %d, want 429", rec.Code)
+	} else if got := rec.Header().Get("Retry-After"); got != "900" {
+		t.Errorf("Retry-After = %q, want 900", got)
+	}
+	// Blocked even for a correct password of an existing account.
+	if rec := loginFrom(h, "192.0.2.77", good, "password123"); rec.Code != 429 {
+		t.Fatalf("correct password from blocked IP: got %d, want 429", rec.Code)
 	}
 	if rec := loginFrom(h, "192.0.2.78", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 401 {
 		t.Fatalf("other IP: got %d, want 401", rec.Code)
 	}
 	clock.Advance(15 * time.Minute)
-	if rec := loginFrom(h, "192.0.2.77", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 401 {
-		t.Fatalf("after window: got %d, want 401", rec.Code)
+	if rec := loginFrom(h, "192.0.2.77", good, "password123"); rec.Code != 200 {
+		t.Fatalf("after window: got %d, want 200", rec.Code)
+	}
+}
+
+func TestLoginRateLimitEmailAndIPAreIndependent(t *testing.T) {
+	h, _, pool := newLimitedRouter(t)
+	a, b := testutil.UniqueEmail("indA"), testutil.UniqueEmail("indB")
+	for _, e := range []string{a, b} {
+		testutil.CleanupUser(t, pool, e)
+		registerUser(t, h, nil, e, "password123")
+	}
+
+	// 5 failures for A from one IP block A, but not B from the same IP.
+	for i := 0; i < 5; i++ {
+		if rec := loginFrom(h, "192.0.2.10", a, "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := loginFrom(h, "192.0.2.10", a, "password123"); rec.Code != 429 {
+		t.Fatalf("A: got %d, want 429", rec.Code)
+	}
+	if rec := loginFrom(h, "192.0.2.10", b, "wrong"); rec.Code != 401 {
+		t.Fatalf("B wrong password: got %d, want 401", rec.Code)
+	}
+	if rec := loginFrom(h, "192.0.2.10", b, "password123"); rec.Code != 200 {
+		t.Fatalf("B right password: got %d, want 200", rec.Code)
+	}
+
+	// 5 failures for another email spread over 5 IPs do not block those IPs.
+	c := testutil.UniqueEmail("indC")
+	testutil.CleanupUser(t, pool, c)
+	registerUser(t, h, nil, c, "password123")
+	for i := 0; i < 5; i++ {
+		loginFrom(h, "192.0.2.2"+string(rune('0'+i)), c, "wrong")
+	}
+	for i := 0; i < 5; i++ {
+		if rec := loginFrom(h, "192.0.2.2"+string(rune('0'+i)), b, "password123"); rec.Code != 200 {
+			t.Fatalf("IP %d with other email: got %d, want 200", i, rec.Code)
+		}
+	}
+}
+
+func TestLoginSuccessDoesNotResetIPCounter(t *testing.T) {
+	h, _, pool := newLimitedRouter(t)
+	good := testutil.UniqueEmail("ipreset")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	for i := 0; i < ipLimit-1; i++ {
+		if rec := loginFrom(h, "192.0.2.40", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := loginFrom(h, "192.0.2.40", good, "password123"); rec.Code != 200 {
+		t.Fatalf("success: got %d, want 200", rec.Code)
+	}
+	if rec := loginFrom(h, "192.0.2.40", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 401 {
+		t.Fatalf("20th failure: got %d, want 401", rec.Code)
+	}
+	if rec := loginFrom(h, "192.0.2.40", testutil.UniqueEmail("ip"), "wrong"); rec.Code != 429 {
+		t.Fatalf("after 20 failures with a success between: got %d, want 429", rec.Code)
+	}
+}
+
+func TestLoginRateLimitBothBlocked(t *testing.T) {
+	t.Run("IP value is larger", func(t *testing.T) {
+		h, clock, pool := newLimitedRouter(t)
+		e := testutil.UniqueEmail("both")
+		testutil.CleanupUser(t, pool, e)
+		registerUser(t, h, nil, e, "password123")
+
+		// Email E is blocked at t0 (failures from other IPs).
+		for i := 0; i < 5; i++ {
+			loginFrom(h, "198.51.100."+string(rune('1'+i)), e, "wrong")
+		}
+		clock.Advance(10 * time.Minute)
+		// IP X reaches its limit now, with other emails.
+		for i := 0; i < ipLimit; i++ {
+			loginFrom(h, "192.0.2.50", testutil.UniqueEmail("x"), "wrong")
+		}
+		rec := loginFrom(h, "192.0.2.50", e, "password123")
+		if rec.Code != 429 || rec.Header().Get("Retry-After") != "900" {
+			t.Errorf("got %d Retry-After %q, want 429 and 900", rec.Code, rec.Header().Get("Retry-After"))
+		}
+	})
+	t.Run("email value is larger", func(t *testing.T) {
+		h, clock, pool := newLimitedRouter(t)
+		e := testutil.UniqueEmail("both")
+		testutil.CleanupUser(t, pool, e)
+		registerUser(t, h, nil, e, "password123")
+
+		// The IP's 15 oldest failures are at t0, with other emails.
+		for i := 0; i < ipLimit-5; i++ {
+			loginFrom(h, "192.0.2.51", testutil.UniqueEmail("x"), "wrong")
+		}
+		clock.Advance(10 * time.Minute)
+		// Its last 5 are against E, which blocks both.
+		for i := 0; i < 5; i++ {
+			loginFrom(h, "192.0.2.51", e, "wrong")
+		}
+		rec := loginFrom(h, "192.0.2.51", e, "password123")
+		if rec.Code != 429 || rec.Header().Get("Retry-After") != "900" {
+			t.Errorf("got %d Retry-After %q, want 429 and 900", rec.Code, rec.Header().Get("Retry-After"))
+		}
+		// An unknown email from the same IP only sees the IP value.
+		rec = loginFrom(h, "192.0.2.51", testutil.UniqueEmail("x"), "wrong")
+		if rec.Code != 429 || rec.Header().Get("Retry-After") != "300" {
+			t.Errorf("got %d Retry-After %q, want 429 and 300", rec.Code, rec.Header().Get("Retry-After"))
+		}
+	})
+}
+
+func TestLoginRateLimitIPBlockIsIdenticalAndNotExtended(t *testing.T) {
+	h, clock, pool := newLimitedRouter(t)
+	good := testutil.UniqueEmail("ipid")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	for i := 0; i < ipLimit; i++ {
+		loginFrom(h, "192.0.2.60", testutil.UniqueEmail("x"), "wrong")
+	}
+	clock.Advance(10 * time.Minute)
+	recs := []*httptest.ResponseRecorder{
+		loginFrom(h, "192.0.2.60", good, "password123"),
+		loginFrom(h, "192.0.2.60", good, "wrong"),
+		loginFrom(h, "192.0.2.60", testutil.UniqueEmail("x"), "wrong"),
+	}
+	for i, rec := range recs {
+		if rec.Code != 429 {
+			t.Fatalf("response %d: got %d, want 429", i, rec.Code)
+		}
+		if got := rec.Header().Get("Retry-After"); got != "300" {
+			t.Errorf("response %d: Retry-After = %q, want 300", i, got)
+		}
+		if rec.Body.String() != recs[0].Body.String() ||
+			rec.Header().Get("Content-Type") != recs[0].Header().Get("Content-Type") {
+			t.Errorf("response %d differs from the first", i)
+		}
+	}
+	// 400s and the 429s above were not counted as failures: the block still
+	// ends when the oldest real failures leave the window.
+	for i := 0; i < ipLimit; i++ {
+		req := httptest.NewRequest("POST", "/auth/login", strings.NewReader(`{`))
+		req.RemoteAddr = "192.0.2.61:1"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 400 {
+			t.Fatalf("invalid body: got %d, want 400", rec.Code)
+		}
+	}
+	if rec := loginFrom(h, "192.0.2.61", good, "password123"); rec.Code != 200 {
+		t.Fatalf("IP after 400s: got %d, want 200", rec.Code)
+	}
+	clock.Advance(5 * time.Minute)
+	if rec := loginFrom(h, "192.0.2.60", good, "password123"); rec.Code != 200 {
+		t.Fatalf("after window: got %d, want 200", rec.Code)
 	}
 }
 
@@ -186,14 +353,14 @@ func TestLoginRateLimitTrustedProxy(t *testing.T) {
 			registerUser(t, h, nil, good, "password123")
 
 			a, b := tc.forwardedFor("198.51.100.1"), tc.forwardedFor("198.51.100.2")
-			for i := 0; i < 5; i++ {
+			for i := 0; i < ipLimit; i++ {
 				// Distinct unknown emails: only the IP counter fills up.
 				if rec := loginViaProxy(h, a, testutil.UniqueEmail("p"), "wrong"); rec.Code != 401 {
 					t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
 				}
 			}
 			if rec := loginViaProxy(h, a, testutil.UniqueEmail("p"), "wrong"); rec.Code != 429 {
-				t.Fatalf("6th from A: got %d, want 429", rec.Code)
+				t.Fatalf("21st from A: got %d, want 429", rec.Code)
 			}
 			wantWrong, wantRight := 401, 200
 			if tc.sameCounter {
@@ -216,7 +383,7 @@ func TestLoginRateLimitTrustedProxyFallback(t *testing.T) {
 	h := api.NewRouter(deps)
 	// Missing or invalid forwarded IP: everyone falls back to the proxy's
 	// remote address and shares one counter.
-	for i := 0; i < 5; i++ {
+	for i := 0; i < ipLimit; i++ {
 		fwd := []string{"", "not-an-ip"}[i%2]
 		if rec := loginViaProxy(h, fwd, testutil.UniqueEmail("fb"), "wrong"); rec.Code != 401 {
 			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
