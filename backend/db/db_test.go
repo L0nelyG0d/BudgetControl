@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"budgetcontrol/api"
@@ -35,7 +36,12 @@ func TestApplySchemaFreshDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg.ConnConfig.RuntimeParams["search_path"] = name
+	// A startup parameter can be dropped by a connection pooler, so set it
+	// explicitly on every new connection.
+	cfg.AfterConnect = func(ctx context.Context, c *pgx.Conn) error {
+		_, err := c.Exec(ctx, "SET search_path TO "+name)
+		return err
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -53,8 +59,10 @@ func TestApplySchemaFreshDatabase(t *testing.T) {
 	}
 
 	h := api.NewRouter(testutil.Deps(pool))
+	email := testutil.UniqueEmail("fresh")
+	testutil.CleanupUser(t, admin, email) // in case the schema isolation failed
 	req := httptest.NewRequest("POST", "/auth/register",
-		strings.NewReader(`{"email":"fresh@test.example","password":"password123"}`))
+		strings.NewReader(`{"email":"`+email+`","password":"password123"}`))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
 	if rec.Code != 201 {
