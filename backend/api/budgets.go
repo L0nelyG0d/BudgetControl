@@ -42,7 +42,7 @@ func (h *Handler) listBudgets(w http.ResponseWriter, r *http.Request) {
 		 WHERE user_id = $1 AND month = $2
 		 ORDER BY category_id NULLS FIRST`, UserIDFrom(r), month)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -50,13 +50,13 @@ func (h *Handler) listBudgets(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var b budgetResponse
 		if err := rows.Scan(&b.CategoryID, &b.Amount); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		out = append(out, b)
 	}
-	if rows.Err() != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+	if err := rows.Err(); err != nil {
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -89,7 +89,7 @@ func (h *Handler) setBudget(w http.ResponseWriter, r *http.Request) {
 			`SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1 AND (user_id IS NULL OR user_id = $2))`,
 			id, UserIDFrom(r)).Scan(&visible)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		if !visible {
@@ -106,7 +106,7 @@ func (h *Handler) setBudget(w http.ResponseWriter, r *http.Request) {
 		 RETURNING category_id, amount`,
 		UserIDFrom(r), categoryID, amount, month).Scan(&out.CategoryID, &out.Amount)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -130,7 +130,7 @@ func (h *Handler) deleteBudget(w http.ResponseWriter, r *http.Request) {
 			`SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1 AND (user_id IS NULL OR user_id = $2))`,
 			id, UserIDFrom(r)).Scan(&visible)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		if !visible {
@@ -144,7 +144,7 @@ func (h *Handler) deleteBudget(w http.ResponseWriter, r *http.Request) {
 		 WHERE user_id = $1 AND month = $2 AND category_id IS NOT DISTINCT FROM $3::bigint`,
 		UserIDFrom(r), month, categoryID)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	if tag.RowsAffected() == 0 {

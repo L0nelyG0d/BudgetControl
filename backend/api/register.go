@@ -48,7 +48,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 
@@ -61,7 +61,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, userResponse{ID: id, Email: email})

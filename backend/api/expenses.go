@@ -112,7 +112,7 @@ func (h *Handler) readExpense(w http.ResponseWriter, r *http.Request) (expenseIn
 		`SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1 AND (user_id IS NULL OR user_id = $2))`,
 		in.categoryID, UserIDFrom(r)).Scan(&visible)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return expenseInput{}, false
 	}
 	if !visible {
@@ -138,14 +138,14 @@ func expenseID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 }
 
 // respondExpense writes the scanned row, mapping no-rows to 404.
-func respondExpense(w http.ResponseWriter, status int, row pgx.Row) {
+func respondExpense(w http.ResponseWriter, r *http.Request, status int, row pgx.Row) {
 	e, err := scanExpense(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(w, http.StatusNotFound, "expense not found")
 		return
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, status, e)
@@ -156,7 +156,7 @@ func (h *Handler) createExpense(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	respondExpense(w, http.StatusCreated, h.deps.DB.QueryRow(r.Context(),
+	respondExpense(w, r, http.StatusCreated, h.deps.DB.QueryRow(r.Context(),
 		`INSERT INTO expenses (user_id, category_id, amount, date, note)
 		 VALUES ($1, $2, $3, $4, $5) RETURNING `+expenseCols,
 		UserIDFrom(r), in.categoryID, in.amount, in.date, in.note))
@@ -177,7 +177,7 @@ func (h *Handler) listExpenses(w http.ResponseWriter, r *http.Request) {
 	q += ` ORDER BY date DESC, id DESC`
 	rows, err := h.deps.DB.Query(r.Context(), q, args...)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -185,13 +185,13 @@ func (h *Handler) listExpenses(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		e, err := scanExpense(rows)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		out = append(out, e)
 	}
-	if rows.Err() != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+	if err := rows.Err(); err != nil {
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -202,7 +202,7 @@ func (h *Handler) getExpense(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	respondExpense(w, http.StatusOK, h.deps.DB.QueryRow(r.Context(),
+	respondExpense(w, r, http.StatusOK, h.deps.DB.QueryRow(r.Context(),
 		`SELECT `+expenseCols+` FROM expenses WHERE id = $1 AND user_id = $2`, id, UserIDFrom(r)))
 }
 
@@ -215,7 +215,7 @@ func (h *Handler) updateExpense(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	respondExpense(w, http.StatusOK, h.deps.DB.QueryRow(r.Context(),
+	respondExpense(w, r, http.StatusOK, h.deps.DB.QueryRow(r.Context(),
 		`UPDATE expenses SET category_id = $3, amount = $4, date = $5, note = $6
 		 WHERE id = $1 AND user_id = $2 RETURNING `+expenseCols,
 		id, UserIDFrom(r), in.categoryID, in.amount, in.date, in.note))
@@ -229,7 +229,7 @@ func (h *Handler) deleteExpense(w http.ResponseWriter, r *http.Request) {
 	tag, err := h.deps.DB.Exec(r.Context(),
 		`DELETE FROM expenses WHERE id = $1 AND user_id = $2`, id, UserIDFrom(r))
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	if tag.RowsAffected() == 0 {

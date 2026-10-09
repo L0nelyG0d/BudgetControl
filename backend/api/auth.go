@@ -122,7 +122,7 @@ func (h *Handler) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		err = h.deps.DB.QueryRow(r.Context(),
 			`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, id).Scan(&exists)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		if !exists {
@@ -155,7 +155,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(h.deps.JWTSecret) < MinSecretLen {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, errors.New("JWT secret is too short"))
 		return
 	}
 
@@ -173,7 +173,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, pgx.ErrNoRows) {
 		hash = string(dummyHash)
 	} else if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	cmpErr := bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password))
@@ -186,7 +186,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	h.loginLimit.succeed(email)
 	c, err := NewSessionCookie(h.deps.JWTSecret, id, now, h.deps.Production)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	http.SetCookie(w, c)
@@ -207,7 +207,7 @@ func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, u)

@@ -58,7 +58,7 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 		 WHERE user_id IS NULL OR user_id = $1
 		 ORDER BY (user_id IS NULL) DESC, name, id`, UserIDFrom(r))
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	defer rows.Close()
@@ -66,13 +66,13 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var c categoryResponse
 		if err := rows.Scan(&c.ID, &c.Name, &c.Color, &c.IsDefault); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, "internal error")
+			httpx.InternalError(w, r, err)
 			return
 		}
 		out = append(out, c)
 	}
-	if rows.Err() != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+	if err := rows.Err(); err != nil {
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, out)
@@ -99,7 +99,7 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	userID := UserIDFrom(r)
 	taken, err := h.nameTaken(r.Context(), userID, name, 0)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	if taken {
@@ -115,7 +115,7 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusCreated, c)
@@ -135,7 +135,7 @@ func categoryID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 // user's category. It returns the current name and color of the user's own one.
 func ownCategory(ctx context.Context, q interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
-}, w http.ResponseWriter, userID, id int64, lock bool) (name, color string, ok bool) {
+}, w http.ResponseWriter, r *http.Request, userID, id int64, lock bool) (name, color string, ok bool) {
 	query := `SELECT user_id, name, color FROM categories WHERE id = $1`
 	if lock {
 		query += ` FOR UPDATE`
@@ -146,7 +146,7 @@ func ownCategory(ctx context.Context, q interface {
 	case errors.Is(err, pgx.ErrNoRows):
 		httpx.Error(w, http.StatusNotFound, "category not found")
 	case err != nil:
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 	case owner == nil:
 		httpx.Error(w, http.StatusForbidden, "default categories cannot be changed")
 	case *owner != userID:
@@ -171,7 +171,7 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := UserIDFrom(r)
-	name, color, ok := ownCategory(r.Context(), h.deps.DB, w, userID, id, false)
+	name, color, ok := ownCategory(r.Context(), h.deps.DB, w, r, userID, id, false)
 	if !ok {
 		return
 	}
@@ -190,7 +190,7 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	taken, err := h.nameTaken(r.Context(), userID, name, id)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	if taken {
@@ -205,7 +205,7 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, categoryResponse{ID: id, Name: name, Color: color})
@@ -220,12 +220,12 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tx, err := h.deps.DB.Begin(ctx)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if _, _, ok := ownCategory(ctx, tx, w, userID, id, true); !ok {
+	if _, _, ok := ownCategory(ctx, tx, w, r, userID, id, true); !ok {
 		return
 	}
 	var otherID int64
@@ -245,7 +245,7 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		err = tx.Commit(ctx)
 	}
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal error")
+		httpx.InternalError(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

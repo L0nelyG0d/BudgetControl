@@ -40,11 +40,15 @@ func main() {
 	if err := deps.Validate(); err != nil {
 		log.Fatal(err)
 	}
-	pool, err := db.Connect(context.Background(), dbURL)
+	ctx := context.Background()
+	pool, err := db.Connect(ctx, dbURL)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}
 	defer pool.Close()
+	if err := db.ApplySchema(ctx, pool); err != nil {
+		log.Fatalf("apply schema: %v", err)
+	}
 
 	deps.DB = pool
 

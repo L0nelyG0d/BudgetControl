@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 )
 
@@ -42,4 +43,14 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+// InternalError logs err with the request method and path and writes the
+// standard 500 body {"error": "internal error"}. Only the method, the path
+// (without query string) and err are logged: never the body, headers,
+// cookies or query, so no password, token or secret can reach the log. err
+// may be nil when the failure has no underlying error.
+func InternalError(w http.ResponseWriter, r *http.Request, err error) {
+	log.Printf("internal error: %s %q: %v", r.Method, r.URL.Path, err)
+	Error(w, http.StatusInternalServerError, "internal error")
 }
