@@ -127,11 +127,12 @@ func scanExpense(row pgx.Row) (expenseResponse, error) {
 	return e, err
 }
 
-// expenseID parses the {id} path value; a malformed id is a 404.
+// expenseID parses the {id} path value; a non-numeric id is a 400 (like
+// categoryID). A numeric id that does not exist is handled by the caller as 404.
 func expenseID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		httpx.Error(w, http.StatusNotFound, "expense not found")
+		httpx.Error(w, http.StatusBadRequest, "invalid expense id")
 		return 0, false
 	}
 	return id, true

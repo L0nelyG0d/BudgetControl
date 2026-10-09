@@ -266,8 +266,9 @@ func TestExpenseGetUpdateDelete(t *testing.T) {
 		t.Errorf("get: %d %s", rec.Code, rec.Body)
 	}
 
-	// Another user's expense and nonexistent / malformed ids are 404.
-	for _, p := range []string{path, "/expenses/999999999", "/expenses/abc", "/expenses/-1"} {
+	// Another user's expense and nonexistent numeric ids (including 0 and
+	// negative ones, which parse as numbers) are 404.
+	for _, p := range []string{path, "/expenses/999999999", "/expenses/0", "/expenses/-1", "/expenses/-5"} {
 		for _, m := range []string{"GET", "PUT", "DELETE"} {
 			t.Run(m+" "+p, func(t *testing.T) {
 				who := other
@@ -408,4 +409,45 @@ func TestAmountCap(t *testing.T) {
 			t.Errorf("PUT budgets: %d", rec.Code)
 		}
 	})
+}
+
+func TestExpenseMalformedID(t *testing.T) {
+	pool := testutil.Pool(t)
+	h := api.NewRouter(testutil.Deps(pool))
+	_, _, c := testutil.NewUser(t, pool)
+	def := defaultCategory(t, pool)
+	e := mustCreate(t, h, c, expBody(100, def, "2026-10-08", "keep"))
+
+	for _, id := range []string{"abc", "1.5", "12abc", "99999999999999999999", "%20"} {
+		for _, m := range []string{"GET", "PUT", "DELETE"} {
+			t.Run(m+" "+id, func(t *testing.T) {
+				rec := do(h, m, "/expenses/"+id, expBody(1, def, "2026-10-08", ""), c)
+				if rec.Code != 400 {
+					t.Fatalf("got %d, want 400: %s", rec.Code, rec.Body)
+				}
+				if got := strings.TrimSpace(rec.Body.String()); got != `{"error":"invalid expense id"}` {
+					t.Errorf("body = %s", got)
+				}
+				// Auth still runs first.
+				if rec := do(h, m, "/expenses/"+id, `{}`); rec.Code != 401 {
+					t.Errorf("no cookie: got %d, want 401", rec.Code)
+				}
+			})
+		}
+	}
+
+	// The id is checked before the body is read: an invalid body changes nothing
+	// and the error is about the id.
+	for _, body := range []string{`{`, ``, `{"amount":-1}`} {
+		rec := do(h, "PUT", "/expenses/abc", body, c)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "invalid expense id") {
+			t.Errorf("PUT abc body %q: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	rec := do(h, "GET", fmt.Sprintf("/expenses/%d", e.ID), "", c)
+	var got expenseJSON
+	_ = json.Unmarshal(rec.Body.Bytes(), &got)
+	if rec.Code != 200 || got.Amount != 100 || got.Note == nil || *got.Note != "keep" {
+		t.Errorf("expense changed: %d %s", rec.Code, rec.Body)
+	}
 }

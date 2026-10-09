@@ -59,6 +59,7 @@ A fullstack web application for tracking personal expenses with category breakdo
   - `GET/POST /categories`
   - `PUT/DELETE /categories/:id` — custom categories only; defaults return `403`
   - `GET/PUT /budgets` — the API uses `?month=YYYY-MM` (e.g. `2026-10`) and converts it to the first day of that month (`2026-10-01`) for storage
+  - Ids in paths: a non-numeric id in `/expenses/:id` or `/categories/:id` returns `400`; a numeric id that does not exist (or belongs to another user) returns `404`
 - Neon/PostgreSQL for data storage
 
 ### Frontend (React)
