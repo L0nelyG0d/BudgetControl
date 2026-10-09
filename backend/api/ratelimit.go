@@ -4,7 +4,9 @@ import (
 	"budgetcontrol/httpx"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -89,11 +91,23 @@ func newLoginLimiter() *loginLimiter {
 	return &loginLimiter{byEmail: newFailureLimiter(), byIP: newFailureLimiter()}
 }
 
-// clientIP is the host of the connection's remote address. X-Forwarded-For is
-// deliberately ignored because clients can forge it; behind a reverse proxy
-// every request would share the proxy's IP until a trusted-proxy setting is
-// added.
-func clientIP(r *http.Request) string {
+// clientIP is the client address used for the per-IP login limit.
+//
+// By default it is the host of the connection's remote address and
+// X-Forwarded-For is ignored, because clients can forge it. With trustProxy
+// (Deps.TrustedProxy, only behind a proxy that appends the real client IP)
+// it is the last entry of the last X-Forwarded-For line, falling back to the
+// remote address when the header is missing, empty or not a valid IP.
+func clientIP(r *http.Request, trustProxy bool) string {
+	if trustProxy {
+		if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
+			last := lines[len(lines)-1]
+			last = strings.TrimSpace(last[strings.LastIndex(last, ",")+1:])
+			if addr, err := netip.ParseAddr(last); err == nil {
+				return addr.String()
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

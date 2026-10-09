@@ -22,14 +22,20 @@ func addr() string {
 	return ":" + port
 }
 
+// trustedProxy reports whether TRUSTED_PROXY is exactly "true".
+func trustedProxy() bool {
+	return os.Getenv("TRUSTED_PROXY") == "true"
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL is not set; set it to the PostgreSQL connection string")
 	}
 	deps := api.Deps{
-		JWTSecret:  []byte(os.Getenv("JWT_SECRET")),
-		Production: os.Getenv("APP_ENV") == "production",
+		JWTSecret:    []byte(os.Getenv("JWT_SECRET")),
+		Production:   os.Getenv("APP_ENV") == "production",
+		TrustedProxy: trustedProxy(),
 	}
 	if err := deps.Validate(); err != nil {
 		log.Fatal(err)

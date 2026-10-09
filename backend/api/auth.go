@@ -159,7 +159,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ip, now := clientIP(r), h.deps.now()
+	ip, now := clientIP(r, h.deps.TrustedProxy), h.deps.now()
 	if wait := h.loginLimit.check(email, ip, now); wait > 0 {
 		writeTooManyAttempts(w, wait)
 		return

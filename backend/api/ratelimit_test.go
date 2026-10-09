@@ -153,3 +153,76 @@ func TestLoginRateLimitSameForUnknownEmail(t *testing.T) {
 		}
 	}
 }
+
+func loginViaProxy(h http.Handler, forwarded, email, pw string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest("POST", "/auth/login",
+		strings.NewReader(`{"email":"`+email+`","password":"`+pw+`"}`))
+	req.RemoteAddr = "10.0.0.1:4321" // always the proxy
+	if forwarded != "" {
+		req.Header.Set("X-Forwarded-For", forwarded)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestLoginRateLimitTrustedProxy(t *testing.T) {
+	pool := testutil.Pool(t)
+	for _, tc := range []struct {
+		name         string
+		trusted      bool
+		sameCounter  bool // do clients A and B share one IP counter
+		forwardedFor func(ip string) string
+	}{
+		{"disabled", false, true, func(ip string) string { return ip }},
+		{"enabled", true, false, func(ip string) string { return "9.9.9.9, " + ip }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testutil.Deps(pool)
+			deps.TrustedProxy = tc.trusted
+			h := api.NewRouter(deps)
+			good := testutil.UniqueEmail("proxyok")
+			testutil.CleanupUser(t, pool, good)
+			registerUser(t, h, nil, good, "password123")
+
+			a, b := tc.forwardedFor("198.51.100.1"), tc.forwardedFor("198.51.100.2")
+			for i := 0; i < 5; i++ {
+				// Distinct unknown emails: only the IP counter fills up.
+				if rec := loginViaProxy(h, a, testutil.UniqueEmail("p"), "wrong"); rec.Code != 401 {
+					t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+				}
+			}
+			if rec := loginViaProxy(h, a, testutil.UniqueEmail("p"), "wrong"); rec.Code != 429 {
+				t.Fatalf("6th from A: got %d, want 429", rec.Code)
+			}
+			wantWrong, wantRight := 401, 200
+			if tc.sameCounter {
+				wantWrong, wantRight = 429, 429
+			}
+			if rec := loginViaProxy(h, b, testutil.UniqueEmail("p"), "wrong"); rec.Code != wantWrong {
+				t.Errorf("B wrong password: got %d, want %d", rec.Code, wantWrong)
+			}
+			if rec := loginViaProxy(h, b, good, "password123"); rec.Code != wantRight {
+				t.Errorf("B right password: got %d, want %d", rec.Code, wantRight)
+			}
+		})
+	}
+}
+
+func TestLoginRateLimitTrustedProxyFallback(t *testing.T) {
+	pool := testutil.Pool(t)
+	deps := testutil.Deps(pool)
+	deps.TrustedProxy = true
+	h := api.NewRouter(deps)
+	// Missing or invalid forwarded IP: everyone falls back to the proxy's
+	// remote address and shares one counter.
+	for i := 0; i < 5; i++ {
+		fwd := []string{"", "not-an-ip"}[i%2]
+		if rec := loginViaProxy(h, fwd, testutil.UniqueEmail("fb"), "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := loginViaProxy(h, "", testutil.UniqueEmail("fb"), "wrong"); rec.Code != 429 {
+		t.Fatalf("got %d, want 429", rec.Code)
+	}
+}

@@ -17,6 +17,8 @@ A fullstack web application for tracking personal expenses with category breakdo
 - Passwords must be at least 8 characters
 - JWT-based session management. The JWT is stored in an httpOnly cookie named `session` (`SameSite=Lax`, `Secure` in production, 7-day lifetime), never in `localStorage` and never returned in a response body
 - `POST /auth/logout` clears the cookie. `GET /auth/me` returns the current user, so the frontend can tell whether someone is logged in
+- Login rate limit: after 5 failed logins for the same email, or from the same client IP, within 15 minutes, further logins return `429` with a `Retry-After` header (seconds). The per-email counter resets on a successful login
+- `TRUSTED_PROXY` (default off; only the exact value `true` enables it): the client IP for the limit is normally the connection's remote address and `X-Forwarded-For` is ignored. Enable it only behind a reverse proxy that appends the real client IP to `X-Forwarded-For`, otherwise clients can forge the header. When enabled, the last entry of the last `X-Forwarded-For` line is used; a missing or invalid value falls back to the remote address
 - In development, Vite proxies `/api` to the Go server (stripping the prefix), so the cookie is same-origin and no CORS setup is needed
 
 ### Expense Logging

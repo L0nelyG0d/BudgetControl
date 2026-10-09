@@ -17,6 +17,10 @@ type Deps struct {
 	JWTSecret []byte
 	// Production makes the session cookie Secure (APP_ENV=production).
 	Production bool
+	// TrustedProxy makes the login limiter use the last X-Forwarded-For entry
+	// as the client IP (TRUSTED_PROXY=true). Enable only behind a proxy that
+	// appends the real client IP; otherwise clients can forge the header.
+	TrustedProxy bool
 	// Now is the clock; nil means time.Now. Tests inject a fake.
 	Now func() time.Time
 }
