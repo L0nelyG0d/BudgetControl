@@ -66,7 +66,7 @@ Description: Follow-up to #13 and #14. Add a previous/next month picker to `/das
 
 ## 17. Backend: rate-limit login attempts
 Goal: Slow down password guessing.
-Description: Follow-up to #5. After 5 failed logins for the same email or from the same IP within 15 minutes, `POST /auth/login` returns `429` with `Retry-After`; in-memory, no new dependency. The login form shows a message on `429`.
+Description: Follow-up to #5. After 5 failed logins for the same email within 15 minutes (or 20 from the same IP, amended by #26), `POST /auth/login` returns `429` with `Retry-After`; in-memory, no new dependency. The login form shows a message on `429`.
 
 ## 18. Remove a budget (backend and frontend)
 Goal: Let users take a budget away again.
@@ -87,3 +87,19 @@ Description: Follow-up to #3 and #4. `main.go` calls `db.ApplySchema` after conn
 ## 22. Backend: consistent 400 for non-numeric ids
 Goal: Make a malformed id behave the same on every route.
 Description: Follow-up to #6 and #7. `GET/PUT/DELETE /expenses/{id}` with a non-numeric id returns `400` like the category routes do; a numeric id that does not exist still returns `404`. Update `_docs/plan.md` and the tests. The id is checked before the body is read; `0`, negative, and nonexistent numeric ids and other users' expenses stay `404`; the response body is `invalid expense id`.
+
+## 23. Frontend: validate the amount cap in forms
+Goal: Users see a clear message in the form before submitting an amount above the backend limit.
+Description: Follow-up to #19. The expense form and the budget amount input show an inline error above 1,000,000,000,000 and do not call the API.
+
+## 24. Backend: limit trusted proxies by address or hop count
+Goal: With TRUSTED_PROXY enabled, a client cannot spoof its IP with its own X-Forwarded-For.
+Description: Follow-up to #20. Let the operator say which proxies are trusted (address list or hop count); document it in `_docs/plan.md`.
+
+## 25. Backend: versioned schema migrations
+Goal: Schema changes after launch are applied in order and tracked.
+Description: Follow-up to #21. Record applied migrations in a table and never re-run them; a fresh database ends in the same state as today's `schema.sql`.
+
+## 26. Backend: separate login rate limits for email and IP
+Goal: Stop shared networks from locking each other out of login, while still throttling password guessing.
+Description: Amends #17 and the #17/#20 tests. Two constants: 5 failed logins per email and 20 per client IP, each per 15 minutes; either limit returns `429` with `Retry-After`, even for the correct password, and the response is identical for correct/wrong passwords and known/unknown emails. `Retry-After` is computed per key (when its oldest counted failure leaves the window); if both are blocked, the larger value is used. A success resets only the email counter; `429`, `400` and `500` responses are not counted as failures. The IP is whatever `clientIP` returns (`TRUSTED_PROXY` from #20 unchanged). Update `_docs/plan.md` and the tests (including the #20 proxy tests, now 20/21) so no document says five from the same IP.
