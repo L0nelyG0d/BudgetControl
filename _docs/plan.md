@@ -69,7 +69,7 @@ A fullstack web application for tracking personal expenses with category breakdo
 ## Money
 - Single currency: Kazakhstani tenge (₸, KZT). No currency column, no multi-currency.
 - Amounts are stored and sent over the API as whole tenge in a `BIGINT` (`1500` = 1,500 ₸). No fractional amounts (tiyn).
-- Amounts must be positive integers.
+- Amounts must be positive integers of at most 1,000,000,000,000 (one trillion tenge), for expenses and budgets alike.
 - The frontend formats with `Intl.NumberFormat('ru-KZ', { style: 'currency', currency: 'KZT' })`.
 
 ## Database Tables (Planned)

@@ -71,9 +71,9 @@ func (h *Handler) setBudget(w http.ResponseWriter, r *http.Request) {
 	if !httpx.DecodeJSON(w, r, &req) {
 		return
 	}
-	amount, ok := parseWholeNumber(req.Amount)
-	if !ok || amount <= 0 {
-		httpx.Error(w, http.StatusBadRequest, "amount must be a positive whole number of tenge")
+	amount, msg := parseAmount(req.Amount)
+	if msg != "" {
+		httpx.Error(w, http.StatusBadRequest, msg)
 		return
 	}
 	// Omitted or null category_id means the overall budget.

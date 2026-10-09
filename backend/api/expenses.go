@@ -16,6 +16,11 @@ import (
 
 const maxNoteLen = 500
 
+// maxAmount is the largest allowed expense or budget amount in whole tenge.
+// It keeps monthly sums far from int64 overflow and below 2^53, so the
+// frontend never loses precision.
+const maxAmount int64 = 1_000_000_000_000
+
 const expenseCols = `id, category_id, amount, to_char(date, 'YYYY-MM-DD'), note, created_at`
 
 type expenseResponse struct {
@@ -57,6 +62,19 @@ func parseWholeNumber(raw json.RawMessage) (int64, bool) {
 	return n, err == nil
 }
 
+// parseAmount validates an expense or budget amount: a positive whole number
+// of at most maxAmount. On failure it returns the 400 message to send.
+func parseAmount(raw json.RawMessage) (int64, string) {
+	n, ok := parseWholeNumber(raw)
+	if !ok || n <= 0 {
+		return 0, "amount must be a positive whole number of tenge"
+	}
+	if n > maxAmount {
+		return 0, "amount must be at most " + strconv.FormatInt(maxAmount, 10) + " tenge"
+	}
+	return n, ""
+}
+
 // readExpense decodes and validates a POST/PUT body, writing a 400 on failure.
 func (h *Handler) readExpense(w http.ResponseWriter, r *http.Request) (expenseInput, bool) {
 	var req expenseRequest
@@ -69,8 +87,9 @@ func (h *Handler) readExpense(w http.ResponseWriter, r *http.Request) (expenseIn
 	}
 	var in expenseInput
 	var ok bool
-	if in.amount, ok = parseWholeNumber(req.Amount); !ok || in.amount <= 0 {
-		return bad("amount must be a positive whole number of tenge")
+	var msg string
+	if in.amount, msg = parseAmount(req.Amount); msg != "" {
+		return bad(msg)
 	}
 	if in.categoryID, ok = parseWholeNumber(req.CategoryID); !ok || in.categoryID <= 0 {
 		return bad("category_id is required")

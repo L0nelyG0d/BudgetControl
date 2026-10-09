@@ -323,3 +323,89 @@ func TestExpensesBadCookie(t *testing.T) {
 		t.Errorf("got %d, want 401", rec.Code)
 	}
 }
+
+func TestAmountCap(t *testing.T) {
+	pool := testutil.Pool(t)
+	h := api.NewRouter(testutil.Deps(pool))
+	uid, _, c := testutil.NewUser(t, pool)
+	def := defaultCategory(t, pool)
+	own := ownCategory(t, pool, uid)
+	const limit, over = 1000000000000, 1000000000001
+
+	t.Run("POST expenses", func(t *testing.T) {
+		rec := do(h, "POST", "/expenses", expBody(limit, def, "2026-10-08", ""), c)
+		var e expenseJSON
+		_ = json.Unmarshal(rec.Body.Bytes(), &e)
+		if rec.Code != 201 || e.Amount != limit {
+			t.Fatalf("limit: %d %s", rec.Code, rec.Body)
+		}
+		before := listIDs(t, h, c, "/expenses")
+		rec = do(h, "POST", "/expenses", expBody(over, def, "2026-10-08", ""), c)
+		if rec.Code != 400 || !strings.Contains(rec.Body.String(), "at most 1000000000000 tenge") {
+			t.Errorf("limit+1: %d %s", rec.Code, rec.Body)
+		}
+		if after := listIDs(t, h, c, "/expenses"); !sameIDs(before, after) {
+			t.Errorf("rejected expense was stored: %v -> %v", before, after)
+		}
+	})
+
+	t.Run("PUT expenses", func(t *testing.T) {
+		e := mustCreate(t, h, c, expBody(5, def, "2026-10-08", "keep"))
+		path := fmt.Sprintf("/expenses/%d", e.ID)
+		if rec := do(h, "PUT", path, expBody(over, def, "2026-10-09", "changed"), c); rec.Code != 400 {
+			t.Errorf("limit+1: %d %s", rec.Code, rec.Body)
+		}
+		var got expenseJSON
+		rec := do(h, "GET", path, "", c)
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.Amount != 5 || got.Date != "2026-10-08" || got.Note == nil || *got.Note != "keep" {
+			t.Errorf("expense changed by rejected PUT: %+v", got)
+		}
+		rec = do(h, "PUT", path, expBody(limit, def, "2026-10-09", ""), c)
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if rec.Code != 200 || got.Amount != limit {
+			t.Errorf("limit: %d %s", rec.Code, rec.Body)
+		}
+	})
+
+	t.Run("PUT budgets", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			cat  string
+		}{
+			{"category", fmt.Sprintf(`"category_id":%d,`, own)},
+			{"overall", ""},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				month := "2026-" + map[string]string{"category": "03", "overall": "04"}[tc.name]
+				body := func(a int64) string { return fmt.Sprintf(`{%s"amount":%d}`, tc.cat, a) }
+				if rec := do(h, "PUT", "/budgets?month="+month, body(7), c); rec.Code != 200 {
+					t.Fatalf("seed: %d %s", rec.Code, rec.Body)
+				}
+				rec := do(h, "PUT", "/budgets?month="+month, body(over), c)
+				if rec.Code != 400 || !strings.Contains(rec.Body.String(), "at most 1000000000000 tenge") {
+					t.Errorf("limit+1: %d %s", rec.Code, rec.Body)
+				}
+				if got := getBudgets(t, h, c, month); len(got) != 1 || got[0].Amount != 7 {
+					t.Errorf("budget changed by rejected PUT: %v", got)
+				}
+				if rec := do(h, "PUT", "/budgets?month="+month, body(limit), c); rec.Code != 200 {
+					t.Errorf("limit: %d %s", rec.Code, rec.Body)
+				}
+				if got := getBudgets(t, h, c, month); len(got) != 1 || got[0].Amount != limit {
+					t.Errorf("budget at limit: %v", got)
+				}
+			})
+		}
+	})
+
+	t.Run("overflowing amount", func(t *testing.T) {
+		const huge = "99999999999999999999"
+		if rec := do(h, "POST", "/expenses", expBody(huge, def, "2026-10-08", ""), c); rec.Code != 400 {
+			t.Errorf("POST: %d", rec.Code)
+		}
+		if rec := do(h, "PUT", "/budgets?month=2026-05", `{"amount":`+huge+`}`, c); rec.Code != 400 {
+			t.Errorf("PUT budgets: %d", rec.Code)
+		}
+	})
+}
