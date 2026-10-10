@@ -1,6 +1,7 @@
 import { useId, useState } from 'react'
 import { Check, Trash2, TriangleAlert } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, ApiError } from '@/lib/api'
+import { validateAmount, parseAmount } from '@/lib/amount'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,15 +19,6 @@ type Props = {
 }
 
 type Status = { kind: 'idle' } | { kind: 'saved' } | { kind: 'removed' } | { kind: 'error'; message: string }
-
-const WHOLE_POSITIVE = /^[1-9]\d{0,14}$/
-
-export function validateAmount(raw: string): string | null {
-  const value = raw.trim()
-  if (value === '') return 'Enter an amount'
-  if (!WHOLE_POSITIVE.test(value)) return 'Enter a whole number greater than 0'
-  return null
-}
 
 export function BudgetRow({ name, color, categoryId, month, initialAmount }: Props) {
   const inputId = useId()
@@ -49,7 +41,7 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
     setSaving(true)
     setStatus({ kind: 'idle' })
     try {
-      const body: { amount: number; category_id?: number } = { amount: Number(value.trim()) }
+      const body: { amount: number; category_id?: number } = { amount: parseAmount(value) }
       if (categoryId !== null) body.category_id = categoryId
       const result = await api<Budget>(`/api/budgets?month=${month}`, { method: 'PUT', body })
       const amount = typeof result?.amount === 'number' ? result.amount : body.amount
@@ -60,7 +52,10 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
       const message = err instanceof Error && err.message ? err.message : 'Could not save'
       setStatus({
         kind: 'error',
-        message: `${message}. Check your connection and try again.`,
+        message:
+          err instanceof ApiError && err.status === 400
+            ? message
+            : `${message}. Check your connection and try again.`,
       })
     } finally {
       setSaving(false)

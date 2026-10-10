@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/select'
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
-import { todayISO, validateAmount, type Category, type Expense } from './expenses'
+import { validateAmount, parseAmount } from '@/lib/amount'
+import { todayISO, type Category, type Expense } from './expenses'
 
 export function ExpenseForm({
   categories,
@@ -56,7 +57,7 @@ export function ExpenseForm({
         {
         method: expense ? 'PUT' : 'POST',
         body: {
-          amount: Number(amount.trim()),
+          amount: parseAmount(amount),
           category_id: category ? category.id : Number(categoryId),
           date,
           ...(note.trim() ? { note: note.trim() } : {}),
@@ -99,7 +100,10 @@ export function ExpenseForm({
             inputMode="numeric"
             autoComplete="off"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
+            onChange={(e) => {
+              setAmount(e.target.value)
+              setAmountError(null)
+            }}
             aria-invalid={amountError ? true : undefined}
             aria-describedby={amountError ? 'expense-amount-error' : undefined}
           />

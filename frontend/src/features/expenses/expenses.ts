@@ -36,14 +36,3 @@ export function todayISO(): string {
   const dd = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}-${mm}-${dd}`
 }
-
-/** Returns an error message, or null when the amount is a positive whole number. */
-export function validateAmount(raw: string): string | null {
-  const value = raw.trim()
-  if (value === '') return 'Enter an amount.'
-  if (!/^\d+$/.test(value) || Number(value) < 1) {
-    return 'Amount must be a whole number greater than 0.'
-  }
-  if (!Number.isSafeInteger(Number(value))) return 'Amount is too large.'
-  return null
-}
