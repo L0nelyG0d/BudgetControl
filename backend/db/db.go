@@ -1,20 +1,14 @@
-// Package db opens the PostgreSQL connection pool and carries the schema.
+// Package db opens the PostgreSQL connection pool and applies the schema migrations.
 package db
 
 import (
 	"context"
-	_ "embed"
 	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
-
-// Schema is the idempotent schema (schema.sql), safe to apply repeatedly.
-//
-//go:embed schema.sql
-var Schema string
 
 // Connect opens a pool for url and verifies it with a ping.
 func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
@@ -27,27 +21,6 @@ func Connect(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 	return pool, nil
-}
-
-// schemaLockID is the advisory lock that serializes schema application, so
-// several processes (e.g. parallel test packages) can apply it at once.
-const schemaLockID = 727001
-
-// ApplySchema runs schema.sql against the pool. It is safe to call
-// concurrently from several processes.
-func ApplySchema(ctx context.Context, pool *pgxpool.Pool) error {
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, Schema); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
 }
 
 // IsUniqueViolation reports whether err is a PostgreSQL unique_violation.

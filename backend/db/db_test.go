@@ -16,13 +16,15 @@ import (
 	"budgetcontrol/testutil"
 )
 
-// TestApplySchemaFreshDatabase applies the schema twice to an empty Postgres
-// schema (a stand-in for a fresh database) and registers a user through the
-// API, which used to fail with 500 when the tables were missing.
-func TestApplySchemaFreshDatabase(t *testing.T) {
-	admin := testutil.Pool(t) // skips when TEST_DATABASE_URL is unset
+// schemaPool returns a pool whose connections use a new, empty Postgres
+// schema (a stand-in for a fresh database), dropped on cleanup. It also
+// returns the admin pool on the default schema. Skips without TEST_DATABASE_URL.
+func schemaPool(t *testing.T) (pool, admin *pgxpool.Pool) {
+	t.Helper()
+	admin = testutil.Pool(t) // skips when TEST_DATABASE_URL is unset
 	ctx := context.Background()
-	name := fmt.Sprintf("fresh_%d", os.Getpid())
+	schemaSeq++
+	name := fmt.Sprintf("mig_%d_%d", os.Getpid(), schemaSeq)
 	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+name); err != nil {
 		t.Fatal(err)
 	}
@@ -42,11 +44,22 @@ func TestApplySchemaFreshDatabase(t *testing.T) {
 		_, err := c.Exec(ctx, "SET search_path TO "+name)
 		return err
 	}
-	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	pool, err = pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	return pool, admin
+}
+
+var schemaSeq int // tests in this package do not run in parallel
+
+// TestApplySchemaFreshDatabase applies the schema twice to an empty Postgres
+// schema and registers a user through the API, which used to fail with 500
+// when the tables were missing.
+func TestApplySchemaFreshDatabase(t *testing.T) {
+	pool, admin := schemaPool(t)
+	ctx := context.Background()
 
 	for i := 1; i <= 2; i++ { // second run: idempotent
 		if err := db.ApplySchema(ctx, pool); err != nil {

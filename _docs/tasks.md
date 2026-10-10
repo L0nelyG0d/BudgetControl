@@ -98,7 +98,7 @@ Description: Follow-up to #20. Add `TRUSTED_PROXIES` (comma-separated IPs/CIDRs,
 
 ## 25. Backend: versioned schema migrations
 Goal: Schema changes after launch are applied in order and tracked.
-Description: Follow-up to #21. Record applied migrations in a table and never re-run them; a fresh database ends in the same state as today's `schema.sql`.
+Description: Follow-up to #21. Move `schema.sql` to `backend/db/migrations/0001_initial.sql` and add numbered `NNNN_name.sql` migrations, embedded and applied in version order under the existing advisory lock in one all-or-nothing transaction. Applied migrations are recorded in `schema_migrations` (version, name, SHA-256 checksum, applied_at) and never re-run; a fresh database ends in the same state as today's `schema.sql` (6 default categories, once). An existing database with no `schema_migrations` table but a `users` table is adopted by recording version 1 without running it (no data change). A failed migration rolls back and records nothing; a modified applied migration (`modified after it was applied`) or a database newer than the binary (`newer than this binary`) fails startup; gaps, duplicates and bad names fail startup. Concurrent starts apply each migration once. Keep `ApplySchema` signature, add an "adding a migration" note to `_docs/plan.md`. Out of scope: down migrations (#31), status/apply-only command (#32), non-transactional migrations (#33), external tools. Decisions to confirm with the user: checksum failure, newer-DB failure, single transaction, baseline detection.
 
 ## 26. Backend: separate login rate limits for email and IP
 Goal: Stop shared networks from locking each other out of login, while still throttling password guessing.
@@ -119,3 +119,15 @@ Description: Follow-up to #24. Design to be agreed with the user first.
 ## 30. Backend: trusted proxy hop count as an alternative to the address list
 Goal: Support deployments whose proxy addresses are not stable.
 Description: Follow-up to #24. e.g. `TRUSTED_PROXY_HOPS=N` takes the Nth entry from the right of `X-Forwarded-For`; must define the interaction with `TRUSTED_PROXIES` and a hop count larger than the chain. Only if the user wants it.
+
+## 31. Backend: down (rollback) migrations
+Goal: A migration can be undone in a controlled way.
+Description: Follow-up to #25, which is forward-only. Design (format, invocation outside startup, effect on `schema_migrations`) to be agreed with the user first; only if the user wants it.
+
+## 32. Backend: migration status and apply-only command
+Goal: An operator can see applied and pending migrations and run them without starting the server.
+Description: Follow-up to #25, which applies migrations only at startup. Design to be agreed with the user first; standard library only.
+
+## 33. Backend: non-transactional migrations
+Goal: Migrations that cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`) can be applied safely.
+Description: Follow-up to #25, which runs everything in one transaction. Must define opt-out and recovery after a partial failure. Only when a real migration needs it.

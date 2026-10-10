@@ -82,6 +82,15 @@ A fullstack web application for tracking personal expenses with category breakdo
 - `expenses` — id, user_id, category_id, amount (BIGINT, whole tenge), date, note, created_at
 - `budgets` — id, user_id, category_id (null = overall), amount (BIGINT, whole tenge), month (DATE, always the 1st of the month, enforced by a CHECK constraint)
 
+## Schema migrations
+The schema lives in `backend/db/migrations/` as embedded `NNNN_description.sql` files (four-digit version, lowercase description). On startup `db.ApplySchema` runs the ones not yet recorded in the `schema_migrations` table, in version order, in one transaction under an advisory lock; a failure rolls everything back.
+
+Adding a migration:
+- Create the next file, e.g. `0002_add_expense_tags.sql`. Versions must be contiguous (no gaps, no duplicates).
+- Never edit a migration that has been applied anywhere (startup fails with `modified after it was applied`); add a new one instead.
+- Write plain SQL valid inside a transaction (no `CREATE INDEX CONCURRENTLY`).
+- A database whose `schema_migrations` has a version this binary lacks refuses to start (`newer than this binary`).
+
 ## Next Steps
 1. Set up Neon database and schema
 2. Build Go REST API with auth
