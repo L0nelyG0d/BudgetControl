@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/netip"
 	"os"
 
 	"budgetcontrol/api"
@@ -27,15 +28,28 @@ func trustedProxy() bool {
 	return os.Getenv("TRUSTED_PROXY") == "true"
 }
 
+// trustedProxies parses TRUSTED_PROXIES; see api.ParseTrustedProxies.
+func trustedProxies(value string) ([]netip.Prefix, error) {
+	return api.ParseTrustedProxies(value)
+}
+
 func main() {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		log.Fatal("DATABASE_URL is not set; set it to the PostgreSQL connection string")
 	}
+	proxies, err := trustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(proxies) > 0 && !trustedProxy() {
+		log.Print("warning: TRUSTED_PROXIES is set but TRUSTED_PROXY is not true; the list is ignored")
+	}
 	deps := api.Deps{
-		JWTSecret:    []byte(os.Getenv("JWT_SECRET")),
-		Production:   os.Getenv("APP_ENV") == "production",
-		TrustedProxy: trustedProxy(),
+		JWTSecret:      []byte(os.Getenv("JWT_SECRET")),
+		Production:     os.Getenv("APP_ENV") == "production",
+		TrustedProxy:   trustedProxy(),
+		TrustedProxies: proxies,
 	}
 	if err := deps.Validate(); err != nil {
 		log.Fatal(err)

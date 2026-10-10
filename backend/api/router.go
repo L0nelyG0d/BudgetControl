@@ -4,6 +4,7 @@ package api
 
 import (
 	"net/http"
+	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,10 +18,14 @@ type Deps struct {
 	JWTSecret []byte
 	// Production makes the session cookie Secure (APP_ENV=production).
 	Production bool
-	// TrustedProxy makes the login limiter use the last X-Forwarded-For entry
-	// as the client IP (TRUSTED_PROXY=true). Enable only behind a proxy that
-	// appends the real client IP; otherwise clients can forge the header.
+	// TrustedProxy makes the login limiter use X-Forwarded-For as the client
+	// IP (TRUSTED_PROXY=true): the last entry, or see TrustedProxies. Enable
+	// only behind a proxy that appends the real client IP; otherwise clients
+	// can forge the header.
 	TrustedProxy bool
+	// TrustedProxies (TRUSTED_PROXIES) lists the proxy IPs/CIDRs whose
+	// X-Forwarded-For is believed; only used when TrustedProxy is true.
+	TrustedProxies []netip.Prefix
 	// Now is the clock; nil means time.Now. Tests inject a fake.
 	Now func() time.Time
 }

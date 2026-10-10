@@ -2,6 +2,8 @@ package api
 
 import (
 	"budgetcontrol/httpx"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
@@ -103,10 +105,17 @@ func newLoginLimiter() *loginLimiter {
 // By default it is the host of the connection's remote address and
 // X-Forwarded-For is ignored, because clients can forge it. With trustProxy
 // (Deps.TrustedProxy, only behind a proxy that appends the real client IP)
-// it is the last entry of the last X-Forwarded-For line, falling back to the
-// remote address when the header is missing, empty or not a valid IP.
-func clientIP(r *http.Request, trustProxy bool) string {
-	if trustProxy {
+// and no proxies list it is the last entry of the last X-Forwarded-For line,
+// falling back to the remote address when the header is missing, empty or not
+// a valid IP.
+//
+// With trustProxy and a non-empty proxies list (Deps.TrustedProxies) the
+// header is only believed when the remote address is in the list. The lines
+// are joined into one chain and walked from the right, skipping listed
+// proxies; the first unlisted entry is the client. A malformed entry, an
+// empty chain or an all-trusted chain falls back to the remote address.
+func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix) string {
+	if trustProxy && len(proxies) == 0 {
 		if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
 			last := lines[len(lines)-1]
 			last = strings.TrimSpace(last[strings.LastIndex(last, ",")+1:])
@@ -117,9 +126,84 @@ func clientIP(r *http.Request, trustProxy bool) string {
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	if !trustProxy || len(proxies) == 0 {
+		return host
+	}
+	remote, err := netip.ParseAddr(host)
+	if err != nil {
+		return host
+	}
+	remote = remote.Unmap()
+	if !inProxies(remote, proxies) {
+		return remote.String()
+	}
+	var chain []string
+	for _, line := range r.Header.Values("X-Forwarded-For") {
+		chain = append(chain, strings.Split(line, ",")...)
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		addr, err := netip.ParseAddr(strings.TrimSpace(chain[i]))
+		if err != nil {
+			break
+		}
+		addr = addr.Unmap()
+		if !inProxies(addr, proxies) {
+			return addr.String()
+		}
+	}
+	return remote.String()
+}
+
+func inProxies(addr netip.Addr, proxies []netip.Prefix) bool {
+	for _, p := range proxies {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// ParseTrustedProxies parses a comma-separated list of IPs and CIDRs
+// (TRUSTED_PROXIES). An empty value gives an empty list. A bad entry
+// returns an error naming it. IPv4-mapped IPv6 entries are stored as IPv4.
+func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
+	}
+	var out []netip.Prefix
+	for _, raw := range strings.Split(value, ",") {
+		entry := strings.TrimSpace(raw)
+		var p netip.Prefix
+		var err error
+		if strings.Contains(entry, "/") {
+			p, err = netip.ParsePrefix(entry)
+			if err == nil && p.Addr().Is4In6() {
+				// Mapped prefix: shift to IPv4 (bits >= 96 only).
+				if p.Bits() < 96 {
+					err = errors.New("prefix too short")
+				} else {
+					p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
+				}
+			}
+		} else {
+			var a netip.Addr
+			a, err = netip.ParseAddr(entry)
+			if err == nil && a.Zone() != "" {
+				err = errors.New("zone not allowed")
+			}
+			if err == nil {
+				a = a.Unmap()
+				p = netip.PrefixFrom(a, a.BitLen())
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("invalid TRUSTED_PROXIES entry %q", entry)
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 // maybeSweep cleans expired entries at most once per window.

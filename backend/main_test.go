@@ -73,3 +73,18 @@ func TestTrustedProxy(t *testing.T) {
 		})
 	}
 }
+
+func TestTrustedProxies(t *testing.T) {
+	t.Parallel()
+	if got, err := trustedProxies("10.0.0.0/8, fd00::1"); err != nil || len(got) != 2 {
+		t.Errorf("valid: got %v, %v", got, err)
+	}
+	if got, err := trustedProxies(""); err != nil || len(got) != 0 {
+		t.Errorf("empty: got %v, %v", got, err)
+	}
+	for _, v := range []string{"10.0.0.0/33", "nonsense", "10.0.0.0/8,,", "fe80::1%eth0"} {
+		if _, err := trustedProxies(v); err == nil {
+			t.Errorf("%q: expected error", v)
+		}
+	}
+}
