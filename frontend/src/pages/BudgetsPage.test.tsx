@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import BudgetsPage from './BudgetsPage'
+import { formatMoney } from '@/lib/format'
 
 const categories = [
   { id: 1, name: 'Food', color: '#ff0000', is_default: true },
@@ -138,5 +139,81 @@ describe('BudgetsPage', () => {
     expect(await screen.findByText(/Server broke/)).toBeInTheDocument()
     expect(screen.getByLabelText('Food budget in tenge')).toHaveValue('150000')
     expect(screen.getByRole('button', { name: 'Remove Food budget' })).toBeInTheDocument()
+  })
+
+  describe('amount cap', () => {
+    const capMessage = `Amount must be at most ${formatMoney(1_000_000_000_000)}.`
+    // Exact match: the default text normalizer would collapse the non-breaking spaces.
+    const capMatcher = (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === capMessage
+    const rows = [['Overall', 'Overall budget in tenge'], ['Food', 'Food budget in tenge']]
+
+    it.each(rows)('%s: over the cap shows the error, sends nothing, clears on edit', async (name, label) => {
+      const fetchMock = mockApi([])
+      render(<BudgetsPage />)
+      const input = await screen.findByLabelText(label)
+      fireEvent.change(input, { target: { value: '1000000000001' } })
+      fireEvent.click(screen.getByRole('button', { name: `Save ${name} budget` }))
+      const error = await screen.findByText(capMatcher)
+      expect(error).toHaveClass('text-destructive')
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(input.getAttribute('aria-describedby')).toBe(error.id)
+      expect(putCalls(fetchMock)).toHaveLength(0)
+      fireEvent.change(input, { target: { value: '1000' } })
+      expect(screen.queryByText(capMatcher)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: `Save ${name} budget` })).toBeEnabled()
+    })
+
+    it('shows the cap error for a 20 digit value', async () => {
+      mockApi([])
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: '12345678901234567890' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      expect(await screen.findByText(capMatcher)).toBeInTheDocument()
+    })
+
+    it('accepts exactly the cap and sends it, trimming spaces', async () => {
+      const fetchMock = mockApi([], () => json(200, { category_id: 1, amount: 1_000_000_000_000 }))
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: ' 1000000000000 ' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      await screen.findByText('Saved')
+      expect(JSON.parse(putCalls(fetchMock)[0][1]!.body as string)).toEqual({ category_id: 1, amount: 1_000_000_000_000 })
+    })
+
+    it('accepts 007 and sends 7', async () => {
+      const fetchMock = mockApi([], () => json(200, { category_id: 1, amount: 7 }))
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: '007' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      await screen.findByText('Saved')
+      expect(JSON.parse(putCalls(fetchMock)[0][1]!.body as string)).toEqual({ category_id: 1, amount: 7 })
+    })
+
+    it('negative above the cap shows the whole-number message, not the cap', async () => {
+      const fetchMock = mockApi([])
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: '-1000000000001' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      expect(await screen.findByText('Amount must be a whole number greater than 0.')).toBeInTheDocument()
+      expect(putCalls(fetchMock)).toHaveLength(0)
+    })
+
+    it('shows the backend 400 message as is, without the connection suffix', async () => {
+      mockApi([], () => json(400, { error: 'amount must be at most 1000000000000 tenge' }))
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: '1000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      const alert = await screen.findByText(/amount must be at most/)
+      expect(alert).toHaveTextContent(/^amount must be at most 1000000000000 tenge$/)
+      expect(alert).not.toHaveTextContent('Check your connection')
+    })
+
+    it('keeps the connection suffix for 5xx errors', async () => {
+      mockApi([], () => json(500, { error: 'Server broke' }))
+      render(<BudgetsPage />)
+      fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: '1000' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+      expect(await screen.findByText(/Server broke\. Check your connection and try again\./)).toBeInTheDocument()
+    })
   })
 })

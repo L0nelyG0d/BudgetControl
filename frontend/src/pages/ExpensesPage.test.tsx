@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ExpensesPage from './ExpensesPage'
+import { formatMoney } from '@/lib/format'
 import { todayISO } from '@/features/expenses/expenses'
 
 const categories = [
@@ -209,6 +210,116 @@ describe('ExpensesPage', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Delete expense' }))
       expect(await within(dialog).findByRole('alert')).toHaveTextContent('Could not delete')
       expect(rowTexts()).toHaveLength(2)
+    })
+  })
+
+  describe('amount cap', () => {
+    const capMessage = `Amount must be at most ${formatMoney(1_000_000_000_000)}.`
+    // Exact match: the default text normalizer would collapse the non-breaking spaces.
+    const capMatcher = (_: string, el: Element | null) => el?.tagName === 'P' && el.textContent === capMessage
+    const edited = { id: 1, category_id: 1, amount: 1_000_000_000_000, date: '2026-10-05', note: 'Lunch', created_at: '2026-10-05T10:00:00Z' }
+    const withPut =
+      (put: Handler): Handler =>
+      (url, init) =>
+        init?.method === 'PUT' ? put(url, init) : standard(existing)(url, init)
+    const putsTo = (fn: ReturnType<typeof mockFetch>) =>
+      fn.mock.calls.filter(([, init]) => init?.method === 'PUT')
+    const modes = [
+      { mode: 'add', button: 'Add expense', method: 'POST' },
+      { mode: 'edit', button: 'Save changes', method: 'PUT' },
+    ]
+
+    async function open(mode: string, handler: Handler) {
+      const fetchMock = mockFetch(handler)
+      render(<ExpensesPage />)
+      await screen.findByRole('table')
+      if (mode === 'edit') {
+        fireEvent.click(screen.getByRole('button', { name: /^Edit expense of 05\.10\.2026/ }))
+      }
+      return fetchMock
+    }
+    const calls = (fn: ReturnType<typeof mockFetch>, method: string) =>
+      method === 'POST' ? postsTo(fn) : putsTo(fn)
+
+    it.each(modes)('$mode: over the cap shows the error, sends nothing, clears on edit', async ({ mode, button, method }) => {
+      const fetchMock = await open(mode, withPut(() => json(200, edited)))
+      const input = screen.getByLabelText(/^Amount/)
+      fireEvent.change(input, { target: { value: '1000000000001' } })
+      fireEvent.click(screen.getByRole('button', { name: button }))
+      const error = await screen.findByText(capMatcher)
+      expect(error).toHaveClass('text-destructive')
+      expect(input).toHaveAttribute('aria-invalid', 'true')
+      expect(input.getAttribute('aria-describedby')).toBe(error.id)
+      expect(calls(fetchMock, method)).toHaveLength(0)
+      fireEvent.change(input, { target: { value: '1000' } })
+      expect(screen.queryByText(capMatcher)).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: button })).toBeEnabled()
+    })
+
+    it.each(modes)('$mode: a 20 digit value shows the cap error', async ({ mode, button }) => {
+      await open(mode, standard(existing))
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '12345678901234567890' } })
+      fireEvent.click(screen.getByRole('button', { name: button }))
+      expect(await screen.findByText(capMatcher)).toBeInTheDocument()
+      expect(screen.queryByText('Amount is too large.')).not.toBeInTheDocument()
+    })
+
+    it.each(modes)('$mode: exactly the cap is sent as 1000000000000', async ({ mode, button, method }) => {
+      const created = { ...edited, id: 3 }
+      const fetchMock = await open(mode, (url, init) =>
+        init?.method === 'POST' ? json(201, created) : withPut(() => json(200, edited))(url, init),
+      )
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: ' 1000000000000 ' } })
+      fireEvent.click(screen.getByRole('button', { name: button }))
+      await waitFor(() => expect(calls(fetchMock, method)).toHaveLength(1))
+      expect(screen.queryByText(capMatcher)).not.toBeInTheDocument()
+      expect(JSON.parse(String(calls(fetchMock, method)[0][1]?.body)).amount).toBe(1_000_000_000_000)
+    })
+
+    it.each(modes)('$mode: 007 is sent as 7', async ({ mode, button, method }) => {
+      const fetchMock = await open(mode, (url, init) =>
+        init?.method === 'POST' ? json(201, { ...edited, id: 3, amount: 7 }) : withPut(() => json(200, { ...edited, amount: 7 }))(url, init),
+      )
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '007' } })
+      fireEvent.click(screen.getByRole('button', { name: button }))
+      await waitFor(() => expect(calls(fetchMock, method)).toHaveLength(1))
+      expect(JSON.parse(String(calls(fetchMock, method)[0][1]?.body)).amount).toBe(7)
+    })
+
+    it.each([
+      ['', 'Enter an amount.'],
+      ['   ', 'Enter an amount.'],
+      ['0', 'Amount must be a whole number greater than 0.'],
+      ['-5', 'Amount must be a whole number greater than 0.'],
+      ['-1000000000001', 'Amount must be a whole number greater than 0.'],
+      ['1500.5', 'Amount must be a whole number greater than 0.'],
+      ['1500,5', 'Amount must be a whole number greater than 0.'],
+      ['abc', 'Amount must be a whole number greater than 0.'],
+      ['1e3', 'Amount must be a whole number greater than 0.'],
+    ])('rejects %j with %j and no request', async (raw, message) => {
+      const fetchMock = await open('add', standard(existing))
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: raw } })
+      fireEvent.click(screen.getByRole('button', { name: 'Add expense' }))
+      expect(await screen.findByText(message)).toBeInTheDocument()
+      expect(postsTo(fetchMock)).toHaveLength(0)
+    })
+
+    it('editing keeps working when the amount is valid and unchanged', async () => {
+      const fetchMock = await open('edit', withPut(() => json(200, existing[0])))
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+      await waitFor(() => expect(putsTo(fetchMock)).toHaveLength(1))
+      expect(JSON.parse(String(putsTo(fetchMock)[0][1]?.body)).amount).toBe(1500)
+    })
+
+    it.each(modes)('$mode: shows the backend 400 message in the form alert and keeps values', async ({ mode, button }) => {
+      const message = 'amount must be at most 1000000000000 tenge'
+      await open(mode, (url, init) =>
+        init?.method === 'POST' || init?.method === 'PUT' ? json(400, { error: message }) : standard(existing)(url, init),
+      )
+      fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: '5000' } })
+      fireEvent.click(screen.getByRole('button', { name: button }))
+      expect(await screen.findByRole('alert')).toHaveTextContent(message)
+      expect(screen.getByLabelText(/^Amount/)).toHaveValue('5000')
     })
   })
 })
