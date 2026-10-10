@@ -93,8 +93,8 @@ Goal: Users see a clear message in the form before submitting an amount above th
 Description: Follow-up to #19. The add/edit expense form and every budget amount input show the inline error `Amount must be at most {formatMoney(1000000000000)}.` above 1,000,000,000,000 and do not call the API; exactly the cap is accepted. One shared frontend validator and constant replace the two `validateAmount` copies, the error clears on edit, and a backend 400 message is shown as is (the budget row must not append the "check your connection" suffix to it). Empty, zero, negative, decimal and non-numeric inputs keep their whole-number messages. Out of scope: thousands separators (#27), reading the limit from the backend (#28).
 
 ## 24. Backend: limit trusted proxies by address or hop count
-Goal: With TRUSTED_PROXY enabled, a client cannot spoof its IP with its own X-Forwarded-For.
-Description: Follow-up to #20. Let the operator say which proxies are trusted (address list or hop count); document it in `_docs/plan.md`.
+Goal: With TRUSTED_PROXY enabled, the login limiter only trusts `X-Forwarded-For` from listed proxies, so a client cannot choose its own IP.
+Description: Follow-up to #20. Add `TRUSTED_PROXIES` (comma-separated IPs/CIDRs, IPv4 and IPv6). With `TRUSTED_PROXY=true` and the list set: a remote address outside the list ignores the header; otherwise walk the joined `X-Forwarded-For` chain from the right, skipping listed proxies, and use the first unlisted entry; malformed entry, empty chain or all-trusted chain falls back to the remote address. Unset list keeps #20 behavior exactly. An invalid list fails startup naming the entry; a list without `TRUSTED_PROXY=true` logs a warning. Document in `_docs/plan.md`. Design (address list first) awaits user confirmation. Out of scope: hop count (#30), other proxy headers (#29).
 
 ## 25. Backend: versioned schema migrations
 Goal: Schema changes after launch are applied in order and tracked.
@@ -111,3 +111,11 @@ Description: Follow-up to #23. Strip spaces and commas used as thousands separat
 ## 28. Expose the amount limit from the backend to the frontend
 Goal: The frontend does not hard-code the amount limit.
 Description: Follow-up to #23. The API exposes the limit and the forms use it, falling back to the backend 400 message. Design to be agreed with the user first.
+
+## 29. Backend: support other proxy headers for the client IP
+Goal: Let operators use `X-Real-IP`, `Forwarded` or similar instead of `X-Forwarded-For`.
+Description: Follow-up to #24. Design to be agreed with the user first.
+
+## 30. Backend: trusted proxy hop count as an alternative to the address list
+Goal: Support deployments whose proxy addresses are not stable.
+Description: Follow-up to #24. e.g. `TRUSTED_PROXY_HOPS=N` takes the Nth entry from the right of `X-Forwarded-For`; must define the interaction with `TRUSTED_PROXIES` and a hop count larger than the chain. Only if the user wants it.
