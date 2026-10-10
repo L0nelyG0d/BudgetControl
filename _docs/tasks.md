@@ -90,7 +90,7 @@ Description: Follow-up to #6 and #7. `GET/PUT/DELETE /expenses/{id}` with a non-
 
 ## 23. Frontend: validate the amount cap in forms
 Goal: Users see a clear message in the form before submitting an amount above the backend limit.
-Description: Follow-up to #19. The expense form and the budget amount input show an inline error above 1,000,000,000,000 and do not call the API.
+Description: Follow-up to #19. The add/edit expense form and every budget amount input show the inline error `Amount must be at most {formatMoney(1000000000000)}.` above 1,000,000,000,000 and do not call the API; exactly the cap is accepted. One shared frontend validator and constant replace the two `validateAmount` copies, the error clears on edit, and a backend 400 message is shown as is (the budget row must not append the "check your connection" suffix to it). Empty, zero, negative, decimal and non-numeric inputs keep their whole-number messages. Out of scope: thousands separators (#27), reading the limit from the backend (#28).
 
 ## 24. Backend: limit trusted proxies by address or hop count
 Goal: With TRUSTED_PROXY enabled, a client cannot spoof its IP with its own X-Forwarded-For.
@@ -103,3 +103,11 @@ Description: Follow-up to #21. Record applied migrations in a table and never re
 ## 26. Backend: separate login rate limits for email and IP
 Goal: Stop shared networks from locking each other out of login, while still throttling password guessing.
 Description: Amends #17 and the #17/#20 tests. Two constants: 5 failed logins per email and 20 per client IP, each per 15 minutes; either limit returns `429` with `Retry-After`, even for the correct password, and the response is identical for correct/wrong passwords and known/unknown emails. `Retry-After` is computed per key (when its oldest counted failure leaves the window); if both are blocked, the larger value is used. A success resets only the email counter; `429`, `400` and `500` responses are not counted as failures. The IP is whatever `clientIP` returns (`TRUSTED_PROXY` from #20 unchanged). Update `_docs/plan.md` and the tests (including the #20 proxy tests, now 20/21) so no document says five from the same IP.
+
+## 27. Frontend: accept thousands separators in amount fields
+Goal: Users can type `1 500` or `1,500` and it is accepted.
+Description: Follow-up to #23. Strip spaces and commas used as thousands separators before validating and sending; decimals are still rejected.
+
+## 28. Expose the amount limit from the backend to the frontend
+Goal: The frontend does not hard-code the amount limit.
+Description: Follow-up to #23. The API exposes the limit and the forms use it, falling back to the backend 400 message. Design to be agreed with the user first.
