@@ -12,6 +12,8 @@ import (
 
 	"budgetcontrol/api"
 	"budgetcontrol/db"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func newMux(deps api.Deps) *http.ServeMux {
@@ -64,25 +66,35 @@ const migrateUsage = "usage: budgetcontrol migrate status|up|down"
 
 const errNoDatabaseURL = "DATABASE_URL is not set; set it to the PostgreSQL connection string"
 
+// migrateOps are the database-backed operations behind `migrate`; each
+// connects to the given URL. They are injected so runMigrate is testable
+// without a database.
+type migrateOps struct {
+	// revert reverts the latest migration, returning its name ("" if none).
+	revert func(ctx context.Context, dbURL string) (string, error)
+	// status reads the migration state without writing anything.
+	status func(ctx context.Context, dbURL string) (db.StatusReport, error)
+	// up applies the pending migrations like server startup.
+	up func(ctx context.Context, dbURL string) (db.ApplyResult, error)
+}
+
 // runMigrate implements `budgetcontrol migrate <verb>` and returns the exit
 // code: 0 success, 1 failure, 2 usage error. args are the arguments after
-// "migrate". Arguments are validated before the database is touched. revert
-// connects to the database at the given URL and reverts the latest
-// migration, returning its name ("" when nothing is applied).
-func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string,
-	revert func(ctx context.Context, dbURL string) (string, error)) int {
+// "migrate". Arguments are validated before the database is touched.
+func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string, ops migrateOps) int {
 	if len(args) != 1 || (args[0] != "status" && args[0] != "up" && args[0] != "down") {
 		fmt.Fprintln(stderr, migrateUsage)
 		return 2
 	}
-	switch args[0] {
+	verb := args[0]
+	dbURL := getenv("DATABASE_URL")
+	if dbURL == "" {
+		fmt.Fprintln(stderr, errNoDatabaseURL)
+		return 1
+	}
+	switch verb {
 	case "down":
-		dbURL := getenv("DATABASE_URL")
-		if dbURL == "" {
-			fmt.Fprintln(stderr, errNoDatabaseURL)
-			return 1
-		}
-		name, err := revert(ctx, dbURL)
+		name, err := ops.revert(ctx, dbURL)
 		if err != nil {
 			fmt.Fprintf(stderr, "migrate down: %v\n", err)
 			return 1
@@ -92,21 +104,66 @@ func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, ge
 		} else {
 			fmt.Fprintf(stdout, "reverted %s\n", name)
 		}
-		return 0
-	default: // status, up: delivered by #32
-		fmt.Fprintf(stderr, "migrate %s: not implemented\n", args[0])
-		return 2
+	case "up":
+		res, err := ops.up(ctx, dbURL)
+		if err != nil {
+			fmt.Fprintf(stderr, "migrate up: %v\n", err)
+			return 1
+		}
+		if res.Adopted {
+			fmt.Fprintln(stdout, "adopted 0001_initial")
+		}
+		for _, name := range res.Applied {
+			fmt.Fprintf(stdout, "applied %s\n", name)
+		}
+		if !res.Adopted && len(res.Applied) == 0 {
+			fmt.Fprintln(stdout, "nothing to apply")
+		}
+	case "status":
+		rep, err := ops.status(ctx, dbURL)
+		if err != nil {
+			fmt.Fprintf(stderr, "migrate status: %v\n", err)
+			return 1
+		}
+		for _, l := range rep.Lines {
+			fmt.Fprintln(stdout, l)
+		}
+		fmt.Fprintln(stdout, rep.Summary())
+		if rep.Legacy {
+			fmt.Fprintln(stderr, "note: legacy database; migrate up will record 0001_initial as applied without running it")
+		}
+		for _, p := range rep.Problems {
+			fmt.Fprintf(stderr, "migrate status: %v\n", p)
+		}
+		if len(rep.Problems) > 0 {
+			return 1
+		}
 	}
+	return 0
 }
 
-// revertLatest is the production revert used by `migrate down`.
-func revertLatest(ctx context.Context, dbURL string) (string, error) {
+// withPool connects to dbURL, runs f and closes the pool.
+func withPool[T any](ctx context.Context, dbURL string, f func(context.Context, *pgxpool.Pool) (T, error)) (T, error) {
 	pool, err := db.Connect(ctx, dbURL)
 	if err != nil {
-		return "", err
+		var zero T
+		return zero, err
 	}
 	defer pool.Close()
-	return db.RevertLatest(ctx, pool)
+	return f(ctx, pool)
+}
+
+// productionOps are the operations main passes to runMigrate.
+var productionOps = migrateOps{
+	revert: func(ctx context.Context, dbURL string) (string, error) {
+		return withPool(ctx, dbURL, db.RevertLatest)
+	},
+	status: func(ctx context.Context, dbURL string) (db.StatusReport, error) {
+		return withPool(ctx, dbURL, db.Status)
+	},
+	up: func(ctx context.Context, dbURL string) (db.ApplyResult, error) {
+		return withPool(ctx, dbURL, db.ApplyEmbedded)
+	},
 }
 
 func main() {
@@ -115,7 +172,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "usage: budgetcontrol [migrate status|up|down]")
 			os.Exit(2)
 		}
-		os.Exit(runMigrate(context.Background(), os.Args[2:], os.Stdout, os.Stderr, os.Getenv, revertLatest))
+		os.Exit(runMigrate(context.Background(), os.Args[2:], os.Stdout, os.Stderr, os.Getenv, productionOps))
 	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
