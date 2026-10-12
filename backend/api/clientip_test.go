@@ -291,3 +291,56 @@ func TestParseTrustedProxyHeader(t *testing.T) {
 		}
 	}
 }
+
+func TestClientIPHopsWithProxies(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		trust  bool
+		hops   int
+		list   string
+		remote string
+		xff    []string
+		want   string
+	}{
+		{"N=1", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1, 2.2.2.2"}, "2.2.2.2"},
+		{"N=2 forged left ignored", true, 2, "10.0.0.0/8", "10.0.0.1:1", []string{"9.9.9.9, 1.1.1.1, 2.2.2.2"}, "1.1.1.1"},
+		{"N=2 two lines joined", true, 2, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1", "2.2.2.2"}, "1.1.1.1"},
+		{"listed chain entries not skipped", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1, 10.0.0.5"}, "10.0.0.5"},
+		{"remote not in list ignores header", true, 1, "10.0.0.0/8", "203.0.113.9:1", []string{"1.1.1.1"}, "203.0.113.9"},
+		{"remote not in list, forged chain", true, 2, "10.0.0.0/8", "203.0.113.9:1", []string{"1.1.1.1, 2.2.2.2"}, "203.0.113.9"},
+		{"chain shorter than N", true, 3, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1, 2.2.2.2"}, "10.0.0.1"},
+		{"missing header", true, 1, "10.0.0.0/8", "10.0.0.1:1", nil, "10.0.0.1"},
+		{"empty header", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{""}, "10.0.0.1"},
+		{"Nth garbage", true, 2, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1, nonsense, 2.2.2.2"}, "10.0.0.1"},
+		{"Nth empty between commas", true, 2, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1,,2.2.2.2"}, "10.0.0.1"},
+		{"Nth with port", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1:80"}, "10.0.0.1"},
+		{"Nth with zone", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"fe80::1%eth0"}, "10.0.0.1"},
+		{"other entries not inspected", true, 2, "10.0.0.0/8", "10.0.0.1:1", []string{"garbage, 1.1.1.1, 2.2.2.2"}, "1.1.1.1"},
+		{"mapped remote matches ipv4 list", true, 1, "10.0.0.0/8", "[::ffff:10.0.0.1]:1", []string{"1.1.1.1"}, "1.1.1.1"},
+		{"mapped remote not in list", true, 1, "10.0.0.0/8", "[::ffff:203.0.113.9]:1", []string{"1.1.1.1"}, "203.0.113.9"},
+		{"ipv6 remote with ipv6 cidr", true, 1, "fd00::/8", "[fd00::1]:1", []string{"2001:db8::1"}, "2001:db8::1"},
+		{"ipv6 remote with ipv6 bare ip", true, 1, "fd00::1", "[fd00::1]:1", []string{"1.1.1.1"}, "1.1.1.1"},
+		{"ipv6 remote not in list", true, 1, "fd00::/8", "[2001:db8::9]:1", []string{"1.1.1.1"}, "2001:db8::9"},
+		{"mapped chain entry returned as ipv4", true, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"::ffff:1.2.3.4"}, "1.2.3.4"},
+		{"unparseable remote", true, 1, "10.0.0.0/8", "garbage", []string{"1.1.1.1"}, "garbage"},
+		{"trust off ignores both", false, 1, "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1"}, "10.0.0.1"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			list, err := ParseTrustedProxies(tc.list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("GET", "/", nil)
+			r.RemoteAddr = tc.remote
+			for _, l := range tc.xff {
+				r.Header.Add("X-Forwarded-For", l)
+			}
+			if got := clientIP(r, tc.trust, list, tc.hops, ""); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

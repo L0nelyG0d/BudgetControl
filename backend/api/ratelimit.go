@@ -116,11 +116,14 @@ func newLoginLimiter() *loginLimiter {
 // proxies; the first unlisted entry is the client. A malformed entry, an
 // empty chain or an all-trusted chain falls back to the remote address.
 //
-// With trustProxy and hops > 0 (Deps.TrustedProxyHops, mutually exclusive with
-// the proxies list) the lines are joined into one chain and the client is the
-// hops-th entry from the right, normalized. A chain shorter than hops or an
-// invalid entry at that position falls back to the remote address; other
-// entries are not inspected. The remote address is not checked.
+// With trustProxy and hops > 0 (Deps.TrustedProxyHops) the lines are joined
+// into one chain and the client is the hops-th entry from the right,
+// normalized. A chain shorter than hops or an invalid entry at that position
+// falls back to the remote address; other entries are not inspected. Without
+// a proxies list the remote address is not checked. With one (hops and list
+// together) the header is only believed when the remote address is in the
+// list, entries of the chain that are themselves listed are not skipped, and
+// the hops count replaces the walk of the list-only mode.
 //
 // With trustProxy and a non-empty header (Deps.TrustedProxyHeader, never
 // X-Forwarded-For, exclusive with hops) that header is read instead: it must
@@ -152,7 +155,18 @@ func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix, hops int
 		}
 		return addr.Unmap().String()
 	}
-	if trustProxy && hops > 0 && len(proxies) == 0 {
+	if trustProxy && hops > 0 {
+		host := remoteHost(r)
+		if len(proxies) > 0 {
+			remote, err := netip.ParseAddr(host)
+			if err != nil {
+				return host
+			}
+			host = remote.Unmap().String()
+			if !inProxies(remote.Unmap(), proxies) {
+				return host
+			}
+		}
 		var chain []string
 		for _, line := range r.Header.Values("X-Forwarded-For") {
 			chain = append(chain, strings.Split(line, ",")...)
@@ -162,7 +176,7 @@ func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix, hops int
 				return addr.Unmap().String()
 			}
 		}
-		return remoteHost(r)
+		return host
 	}
 	if trustProxy && len(proxies) == 0 {
 		if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {

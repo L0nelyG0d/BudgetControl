@@ -3,6 +3,7 @@ package api_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -419,6 +420,59 @@ func TestLoginRateLimitTrustedProxyHops(t *testing.T) {
 	}
 	if rec := loginViaProxy(h, b, good, "password123"); rec.Code != 200 {
 		t.Errorf("B right password: got %d, want 200", rec.Code)
+	}
+}
+
+func TestLoginRateLimitTrustedProxyHopsWithList(t *testing.T) {
+	pool := testutil.Pool(t)
+	deps := testutil.Deps(pool)
+	deps.TrustedProxy = true
+	deps.TrustedProxyHops = 1
+	proxies, err := api.ParseTrustedProxies("10.0.0.0/8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps.TrustedProxies = proxies
+	h := api.NewRouter(deps)
+	good := testutil.UniqueEmail("hopslist")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	// Two clients behind a listed proxy get separate counters.
+	a, b := "9.9.9.9, 198.51.100.1", "9.9.9.9, 198.51.100.2"
+	for i := 0; i < ipLimit; i++ {
+		if rec := loginViaProxy(h, a, testutil.UniqueEmail("h"), "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := loginViaProxy(h, a, testutil.UniqueEmail("h"), "wrong"); rec.Code != 429 {
+		t.Fatalf("21st from A: got %d, want 429", rec.Code)
+	}
+	if rec := loginViaProxy(h, b, good, "password123"); rec.Code != 200 {
+		t.Errorf("B right password: got %d, want 200", rec.Code)
+	}
+
+	// An unlisted remote address sending a forged header is counted under
+	// its own address, so rotating the header does not dodge the limit.
+	for i := 0; i < ipLimit; i++ {
+		req := httptest.NewRequest("POST", "/auth/login",
+			strings.NewReader(`{"email":"`+testutil.UniqueEmail("u")+`","password":"wrong"}`))
+		req.RemoteAddr = "203.0.113.50:1"
+		req.Header.Set("X-Forwarded-For", "198.51.100."+strconv.Itoa(i+10))
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != 401 {
+			t.Fatalf("unlisted attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	req := httptest.NewRequest("POST", "/auth/login",
+		strings.NewReader(`{"email":"`+testutil.UniqueEmail("u")+`","password":"wrong"}`))
+	req.RemoteAddr = "203.0.113.50:1"
+	req.Header.Set("X-Forwarded-For", "198.51.100.99")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != 429 {
+		t.Errorf("unlisted 21st with fresh forged header: got %d, want 429", rec.Code)
 	}
 }
 

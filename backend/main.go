@@ -56,9 +56,6 @@ func proxyConfig(proxiesValue, hopsValue, headerValue string, trusted bool) (pro
 	if err != nil {
 		return nil, 0, "", nil, err
 	}
-	if hops > 0 && len(proxies) > 0 {
-		return nil, 0, "", nil, errors.New("only one of TRUSTED_PROXIES and TRUSTED_PROXY_HOPS may be set")
-	}
 	if hops > 0 && header != "" {
 		return nil, 0, "", nil, errors.New("only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set")
 	}

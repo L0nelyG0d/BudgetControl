@@ -100,7 +100,7 @@ func TestProxyConfig(t *testing.T) {
 		trusted                     bool
 		wantHops, wantList          int
 		wantHeader                  string
-		wantWarn                    string
+		wantWarn, wantWarn2         string
 		wantErr                     string
 	}{
 		{name: "both unset", trusted: true},
@@ -113,8 +113,15 @@ func TestProxyConfig(t *testing.T) {
 		{name: "above max", hops: "65", trusted: true, wantErr: `invalid TRUSTED_PROXY_HOPS "65"`},
 		{name: "zero", hops: "0", trusted: true, wantErr: `invalid TRUSTED_PROXY_HOPS "0"`},
 		{name: "invalid without trust still fails", hops: "abc", wantErr: `invalid TRUSTED_PROXY_HOPS "abc"`},
-		{name: "both set", hops: "2", proxies: "10.0.0.1", trusted: true, wantErr: "only one of"},
-		{name: "both set without trust", hops: "2", proxies: "10.0.0.1", wantErr: "only one of"},
+		{name: "hops and list together", hops: "2", proxies: "10.0.0.0/8", trusted: true, wantHops: 2, wantList: 1},
+		{name: "hops and list without trust warns", hops: "2", proxies: "10.0.0.0/8", wantHops: 2, wantList: 1, wantWarn: "TRUSTED_PROXIES is set but TRUSTED_PROXY is not true; the list is ignored", wantWarn2: "TRUSTED_PROXY_HOPS is set but TRUSTED_PROXY is not true; the hop count is ignored"},
+		{name: "hops and list invalid entry", hops: "2", proxies: "10.0.0.0/99", trusted: true, wantErr: `invalid TRUSTED_PROXIES entry "10.0.0.0/99"`},
+		{name: "hops and list invalid hops", hops: "65", proxies: "10.0.0.0/8", trusted: true, wantErr: `invalid TRUSTED_PROXY_HOPS "65"`},
+		{name: "hops zero and list", hops: "0", proxies: "10.0.0.0/8", wantErr: `invalid TRUSTED_PROXY_HOPS "0"`},
+		{name: "hops abc and list", hops: "abc", proxies: "10.0.0.0/8", trusted: true, wantErr: `invalid TRUSTED_PROXY_HOPS "abc"`},
+		{name: "header with hops and list", header: "X-Real-IP", hops: "2", proxies: "10.0.0.0/8", trusted: true, wantErr: "only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set"},
+		{name: "header with hops and list without trust", header: "X-Real-IP", hops: "2", proxies: "10.0.0.0/8", wantErr: "only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set"},
+		{name: "xff header with hops and list", header: "X-Forwarded-For", hops: "2", proxies: "10.0.0.0/8", trusted: true, wantHops: 2, wantList: 1},
 		{name: "blank list and hops ok", hops: "1", proxies: "  ", trusted: true, wantHops: 1},
 		{name: "header unset", header: "", trusted: true},
 		{name: "header spaces only", header: "   ", trusted: true},
@@ -159,7 +166,11 @@ func TestProxyConfig(t *testing.T) {
 			if tc.wantWarn == "" && len(warns) != 0 {
 				t.Errorf("unexpected warnings %v", warns)
 			}
-			if tc.wantWarn != "" && (len(warns) != 1 || !strings.Contains(warns[0], tc.wantWarn)) {
+			if tc.wantWarn2 != "" {
+				if len(warns) != 2 || !strings.Contains(warns[0], tc.wantWarn) || !strings.Contains(warns[1], tc.wantWarn2) {
+					t.Errorf("got warnings %v, want [%q %q]", warns, tc.wantWarn, tc.wantWarn2)
+				}
+			} else if tc.wantWarn != "" && (len(warns) != 1 || !strings.Contains(warns[0], tc.wantWarn)) {
 				t.Errorf("got warnings %v, want one containing %q", warns, tc.wantWarn)
 			}
 		})
