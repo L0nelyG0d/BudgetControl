@@ -8,6 +8,23 @@ const PLAIN = /^\d+$/
 const GROUPED = /^[1-9]\d{0,2}(?:[   ,]\d{3})+$/
 const TYPED = /^[\d ]*$/
 
+// Currency marker accepted on PASTE only (task 35). The marker list (₸, KZT, тг and
+// "тг." with one trailing dot), case-insensitivity, prefix or suffix, optional
+// space/NBSP/narrow NBSP between marker and number, and "one marker only" are PM
+// defaults, NOT yet confirmed by the user. validateAmount/parseAmount stay strict.
+const MARKER = '(?:₸|KZT|тг\\.?)'
+const SEP = '[ \\u00a0\\u202f]*'
+const PREFIXED = new RegExp(`^${MARKER}${SEP}(.+)$`, 'iu')
+const SUFFIXED = new RegExp(`^(.+?)${SEP}${MARKER}$`, 'iu')
+
+/** Removes one currency marker around a strict number; otherwise returns null. */
+function stripMarker(trimmed: string): string | null {
+  const m = PREFIXED.exec(trimmed) ?? SUFFIXED.exec(trimmed)
+  if (!m) return null
+  const number = m[1].trim()
+  return PLAIN.test(number) || GROUPED.test(number) ? number : null
+}
+
 export type FormatInput = {
   /** The field value before the change. */
   prev: string
@@ -60,7 +77,14 @@ export function formatAmountInput({ prev, raw, caret, inputType, pasted }: Forma
     }
   }
 
-  const trimmed = text.trim()
+  let trimmed = text.trim()
+  const isPaste = !!pasted || (inputType?.startsWith('insertFromPaste') ?? false)
+  const bare = isPaste ? stripMarker(trimmed) : null
+  if (bare !== null) {
+    // Pasted "1 500 ₸": format the bare number and put the caret after the last digit.
+    text = trimmed = bare
+    at = bare.length
+  }
   const strict = PLAIN.test(trimmed) || GROUPED.test(trimmed)
   // Real keystrokes carry an inputType; pastes and programmatic changes are held to the strict shapes.
   const keystroke = !pasted && inputType !== undefined && !inputType.startsWith('insertFromPaste')
@@ -113,6 +137,10 @@ export function useAmountInput(setValue: (value: string) => void, prevValue: str
     ref,
     onPaste: (_e: ClipboardEvent<HTMLInputElement>) => {
       pasted.current = true
+      // The change event follows in the same task; clear the flag even if none comes.
+      setTimeout(() => {
+        pasted.current = false
+      }, 0)
     },
     onChange: (e: ChangeEvent<HTMLInputElement>) => {
       const native = e.nativeEvent as InputEvent

@@ -70,7 +70,7 @@ describe('formatAmountInput value', () => {
     expect(formatAmountInput({ prev: '', raw, caret: raw.length, inputType: 'insertFromPaste', pasted: true }).value).toBe(value)
   })
 
-  it.each(['1500.5', '1,5', '1,00', '1.500', '12 34', '1 500 ₸', 'abc', '1  000'])(
+  it.each(['1500.5', '1,5', '1,00', '1.500', '12 34', 'abc', '1  000'])(
     'leaves pasted %j as pasted',
     (raw) => {
       expect(formatAmountInput({ prev: '', raw, caret: raw.length, pasted: true })).toEqual({ value: raw, caret: raw.length })
@@ -135,5 +135,62 @@ describe('formatAmountInput caret', () => {
 
   it('a deleted selection that leaves a gap regroups', () => {
     expect(type('1 234 567', '1 267', 2, { inputType: 'deleteContentBackward' })).toEqual({ value: '1 267', caret: 1 })
+  })
+})
+
+// Currency marker on paste (task 35). Marker list, case, prefix/suffix, spacing and
+// paste-only are PM defaults, not yet confirmed by the user.
+describe('pasted currency marker', () => {
+  const pasteOf = (raw: string) =>
+    formatAmountInput({ prev: '', raw, caret: raw.length, inputType: 'insertFromPaste', pasted: true })
+
+  it.each([
+    ['1 500 ₸', '1 500'],
+    ['1500 ₸', '1 500'],
+    ['1500₸', '1 500'],
+    ['₸1500', '1 500'],
+    ['₸ 1 500', '1 500'],
+    ['KZT 1,500', '1 500'],
+    ['тг 1500', '1 500'],
+    ['1500 тг', '1 500'],
+    ['1500 KZT', '1 500'],
+    ['1500тг.', '1 500'],
+    ['тг. 1500', '1 500'],
+    ['kzt 1500', '1 500'],
+    ['1500 Kzt', '1 500'],
+    ['1500 ТГ', '1 500'],
+    ['1500 Тг.', '1 500'],
+    ['1 500\u00a0₸', '1 500'],
+    ['1 500\u202f₸', '1 500'],
+    ['₸\u00a01 500', '1 500'],
+    ['  1 500 ₸  ', '1 500'],
+    ['1 500 000 ₸', '1 500 000'],
+    ['₸ 0015', '15'],
+  ])('strips the marker from pasted %j -> %j', (raw, value) => {
+    const r = pasteOf(raw)
+    expect(r.value).toBe(value)
+    expect(r.caret).toBe(value.length)
+    expect(validateAmount(r.value, null)).toBeNull()
+  })
+
+  it('gives the same result as the bare number', () => {
+    expect(pasteOf('₸ 1500000')).toEqual(pasteOf('1500000'))
+  })
+
+  it.each([
+    '1 500,50 ₸', '1500.5 ₸', '12 34 ₸', '1,5 ₸',
+    '₸1500₸', '₸ 1500 KZT', '₸', 'KZT', 'тг.', '1₸500',
+    'тенге', 'tg', '$1500', '1500 тенге', '1500 тг..',
+  ])('leaves pasted %j as pasted', (raw) => {
+    expect(pasteOf(raw)).toEqual({ value: raw, caret: raw.length })
+  })
+
+  it.each(['1 500 ₸', '₸1500', 'KZT 1500'])('does not strip a typed %j', (raw) => {
+    expect(type('', raw, raw.length)).toEqual({ value: raw, caret: raw.length })
+  })
+
+  it('formatAmountValue and validateAmount stay strict', () => {
+    expect(validateAmount('1 500 ₸', null)).not.toBeNull()
+    expect(formatAmountValue('1 500 ₸')).toBe('1 500 ₸')
   })
 })

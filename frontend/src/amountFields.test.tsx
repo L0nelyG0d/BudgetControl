@@ -125,6 +125,45 @@ describe.each([expenseSetup, budgetSetup])('$name amount grouping', (s) => {
     expect(input).toHaveValue('1 500 000')
   })
 
+  it('pastes a value with a currency marker and submits the plain number', async () => {
+    const fetchMock = mockFetch()
+    s.render()
+    const input = s.input() as HTMLInputElement
+    paste(input, '1 500 ₸')
+    expect(input).toHaveValue('1 500')
+    expect(s.error()).toBeNull()
+    s.submit()
+    await waitFor(() => expect(writes(fetchMock)).toHaveLength(1))
+    expect(JSON.parse(writes(fetchMock)[0][1]!.body as string).amount).toBe(1500)
+  })
+
+  it('rejects a typed currency marker on submit', async () => {
+    mockFetch()
+    s.render()
+    const input = s.input() as HTMLInputElement
+    typeKeys(input, '1500 ₸')
+    expect(input.value).toContain('₸')
+    s.submit()
+    expect(await screen.findByText('Amount must be a whole number greater than 0.')).toBeInTheDocument()
+  })
+
+  it('a paste with no change event does not make the next keystroke strict', () => {
+    vi.useFakeTimers()
+    try {
+      mockFetch()
+      s.render()
+      const input = s.input() as HTMLInputElement
+      fireEvent.paste(input)
+      act(() => {
+        vi.runAllTimers()
+      })
+      typeKeys(input, '1500')
+      expect(input).toHaveValue('1 500')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('leaves a pasted decimal as pasted and shows the validator error on submit', async () => {
     const fetchMock = mockFetch()
     s.render()
