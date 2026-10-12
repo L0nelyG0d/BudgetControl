@@ -117,8 +117,8 @@ Goal: Let operators use `X-Real-IP`, `Forwarded` or similar instead of `X-Forwar
 Description: Follow-up to #24. Design to be agreed with the user first.
 
 ## 30. Backend: trusted proxy hop count as an alternative to the address list
-Goal: Support deployments whose proxy addresses are not stable.
-Description: Follow-up to #24. e.g. `TRUSTED_PROXY_HOPS=N` takes the Nth entry from the right of `X-Forwarded-For`; must define the interaction with `TRUSTED_PROXIES` and a hop count larger than the chain. Only if the user wants it.
+Goal: With TRUSTED_PROXY enabled, an operator can set the number of proxies in front of the server instead of listing their addresses.
+Description: Follow-up to #24. Add `TRUSTED_PROXY_HOPS=N` (integer 1-64, spaces trimmed): the client IP is the Nth entry from the right of the joined `X-Forwarded-For` chain (N=1 equals the #20 default). A chain shorter than N, or a malformed Nth entry, falls back to the remote address. Zero, negative, non-numeric or above 64 fails startup with `invalid TRUSTED_PROXY_HOPS "<value>"`; setting it together with `TRUSTED_PROXIES` also fails startup; setting it without `TRUSTED_PROXY=true` logs a warning and is ignored. The remote address is not checked in this mode. Go tests for `clientIP` and startup validation, and `_docs/plan.md` documents it. Out of scope: combining with the address list (#38), logging fallbacks (#39), other proxy headers (#29). Decisions made while grooming, see the issue Constraints.
 
 ## 31. Backend: down (rollback) migrations
 Goal: A migration can be undone in a controlled way.
@@ -147,3 +147,11 @@ Description: Follow-up to #28. Design (retry on next form open, timed, or manual
 ## 37. Backend: expose other validation limits through GET /config
 Goal: Other limits the frontend duplicates (e.g. minimum password length) are read from `GET /config`.
 Description: Follow-up to #28. Which limits to expose to be agreed with the user first; only if the user wants it.
+
+## 38. Backend: combine trusted proxy hop count with the address list
+Goal: An operator can use `TRUSTED_PROXY_HOPS` and `TRUSTED_PROXIES` together.
+Description: Follow-up to #30, where setting both is a startup error. Design to be agreed with the user first; standard library only.
+
+## 39. Backend: log client IP fallbacks behind a trusted proxy
+Goal: An operator can see when the proxy setup does not match the configured hop count.
+Description: Follow-up to #30. Log (rate limited) when the client IP falls back to the remote address. Design to be agreed with the user first; standard library only.
