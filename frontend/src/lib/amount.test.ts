@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { MAX_AMOUNT, parseAmount, validateAmount } from './amount'
+import { parseAmount, validateAmount } from './amount'
 import { formatMoney } from './format'
 
-const capMessage = `Amount must be at most ${formatMoney(MAX_AMOUNT)}.`
+const MAX = 1_000_000_000_000
+const capMessage = `Amount must be at most ${formatMoney(MAX)}.`
 const wholeMessage = 'Amount must be a whole number greater than 0.'
 
 describe('validateAmount', () => {
@@ -59,7 +60,31 @@ describe('validateAmount', () => {
     ['1\t500', wholeMessage],
     ['1\n500', wholeMessage],
   ])('%j -> %j', (raw, want) => {
+    expect(validateAmount(raw, MAX)).toBe(want)
+  })
+
+  it('uses the given limit in the check and the message', () => {
+    expect(validateAmount('5000', 5000)).toBeNull()
+    expect(validateAmount('5001', 5000)).toBe(`Amount must be at most ${formatMoney(5000)}.`)
+  })
+
+  // Limit unknown (loading or failed): no cap check, all other rules stay.
+  it.each([
+    ['1000000000001', null],
+    ['12345678901234567890', null],
+    ['1 000 000 000 001', null],
+    ['1500', null],
+    ['', 'Enter an amount.'],
+    ['0', wholeMessage],
+    ['-5', wholeMessage],
+    ['1.5', wholeMessage],
+    ['1,5', wholeMessage],
+    ['abc', wholeMessage],
+    ['1 500', null],
+    ['12 34', wholeMessage],
+  ])('without a limit %j -> %j', (raw, want) => {
     expect(validateAmount(raw)).toBe(want)
+    expect(validateAmount(raw, null)).toBe(want)
   })
 
   it('parses with leading zeros and spaces', () => {

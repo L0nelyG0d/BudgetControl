@@ -28,6 +28,7 @@ const standard =
     if (init?.method === 'POST' && post) return post(url, init)
     if (url === '/api/expenses') return json(200, expenses)
     if (url === '/api/categories') return json(200, categories)
+    if (url === '/api/config') return json(200, { maxAmount: 1_000_000_000_000 })
     return json(404, { error: 'not found' })
   }
 

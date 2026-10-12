@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { Check, Trash2, TriangleAlert } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { validateAmount, parseAmount } from '@/lib/amount'
+import { useMaxAmount } from '@/lib/config'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,6 +23,7 @@ type Status = { kind: 'idle' } | { kind: 'saved' } | { kind: 'removed' } | { kin
 
 export function BudgetRow({ name, color, categoryId, month, initialAmount }: Props) {
   const inputId = useId()
+  const maxAmount = useMaxAmount()
   const errorId = `${inputId}-error`
   const [saved, setSaved] = useState<number | undefined>(initialAmount)
   const [value, setValue] = useState(initialAmount === undefined ? '' : String(initialAmount))
@@ -32,7 +34,7 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    const problem = validateAmount(value)
+    const problem = validateAmount(value, maxAmount)
     setFieldError(problem)
     if (problem) {
       setStatus({ kind: 'idle' })

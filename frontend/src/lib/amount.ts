@@ -1,11 +1,5 @@
 import { formatMoney } from './format'
 
-/**
- * Largest allowed expense or budget amount in whole tenge.
- * Keep in sync with `maxAmount` in backend/api/expenses.go.
- */
-export const MAX_AMOUNT = 1_000_000_000_000
-
 const WHOLE_MESSAGE = 'Amount must be a whole number greater than 0.'
 
 // Plain digits, or strictly grouped thousands: a first group of 1-3 digits not
@@ -26,9 +20,10 @@ function cleanAmount(raw: string): string | null {
 /**
  * Shared amount check for the expense form and the budget inputs.
  * Returns an error message, or null when the amount is a whole number
- * from 1 to MAX_AMOUNT. Surrounding whitespace is ignored, thousands separators are accepted; leading zeros are fine.
+ * from 1 to `max`. `max` is the limit loaded from GET /config; while it is
+ * unknown (null) the cap is not checked and the backend answers. Surrounding whitespace is ignored, thousands separators are accepted; leading zeros are fine.
  */
-export function validateAmount(raw: string): string | null {
+export function validateAmount(raw: string, max: number | null = null): string | null {
   if (raw.trim() === '') return 'Enter an amount.'
   const value = cleanAmount(raw)
   if (value === null) return WHOLE_MESSAGE
@@ -36,9 +31,11 @@ export function validateAmount(raw: string): string | null {
   // strings never go through Number() and lose precision.
   const digits = value.replace(/^0+/, '')
   if (digits === '') return WHOLE_MESSAGE
-  const max = String(MAX_AMOUNT)
-  if (digits.length > max.length || (digits.length === max.length && digits > max)) {
-    return `Amount must be at most ${formatMoney(MAX_AMOUNT)}.`
+  if (max !== null) {
+    const limit = String(max)
+    if (digits.length > limit.length || (digits.length === limit.length && digits > limit)) {
+      return `Amount must be at most ${formatMoney(max)}.`
+    }
   }
   return null
 }

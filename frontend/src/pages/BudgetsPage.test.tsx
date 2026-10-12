@@ -18,6 +18,7 @@ function mockApi(budgets: unknown[], put?: Handler, del?: Handler) {
     if (init?.method === 'PUT') return put ? put(url, init) : json(200, {})
     if (init?.method === 'DELETE') return del ? del(url, init) : Promise.resolve(new Response(null, { status: 204 }))
     if (url === '/api/categories') return json(200, categories)
+    if (url === '/api/config') return json(200, { maxAmount: 1_000_000_000_000 })
     if (url.startsWith('/api/budgets')) return json(200, budgets)
     return json(404, { error: 'not found' })
   })

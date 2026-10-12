@@ -12,6 +12,7 @@ import {
 import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { validateAmount, parseAmount } from '@/lib/amount'
+import { useMaxAmount } from '@/lib/config'
 import { todayISO, type Category, type Expense } from './expenses'
 
 export function ExpenseForm({
@@ -27,6 +28,7 @@ export function ExpenseForm({
   onCancel?: () => void
 }) {
   const editing = expense !== undefined
+  const maxAmount = useMaxAmount()
   const [amount, setAmount] = useState(expense ? String(expense.amount) : '')
   const [categoryId, setCategoryId] = useState(() =>
     expense ? String(expense.category_id) : categories[0] ? String(categories[0].id) : '',
@@ -43,7 +45,7 @@ export function ExpenseForm({
     if (pending) return
     setSaved(false)
     setFormError(null)
-    const err = validateAmount(amount)
+    const err = validateAmount(amount, maxAmount)
     setAmountError(err)
     if (err) return
     if (!categoryId) return setFormError('Choose a category.')
