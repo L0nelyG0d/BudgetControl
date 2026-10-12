@@ -222,6 +222,7 @@ function ExpenseTable({
     )
   }
   const names = new Map(data.categories.map((c) => [String(c.id), c.name]))
+  const colors = new Map(data.categories.map((c) => [String(c.id), c.color]))
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
       <Table>
@@ -237,10 +238,19 @@ function ExpenseTable({
         <TableBody>
           {data.expenses.map((e) => (
             <TableRow key={e.id}>
-              <TableCell className="text-right tabular-nums">{formatMoney(e.amount)}</TableCell>
-              <TableCell>{names.get(String(e.category_id)) ?? 'Unknown'}</TableCell>
-              <TableCell className="tabular-nums">{formatDate(e.date)}</TableCell>
-              <TableCell className="text-muted-foreground">{e.note ?? ''}</TableCell>
+              <TableCell className="text-right font-semibold tabular-nums">{formatMoney(e.amount)}</TableCell>
+              <TableCell>
+                <span className="flex items-center gap-2">
+                  <span
+                    aria-hidden="true"
+                    className="size-2.5 shrink-0 rounded-full bg-muted-foreground"
+                    style={{ backgroundColor: colors.get(String(e.category_id)) }}
+                  />
+                  {names.get(String(e.category_id)) ?? 'Unknown'}
+                </span>
+              </TableCell>
+              <TableCell className="text-muted-foreground tabular-nums">{formatDate(e.date)}</TableCell>
+              <TableCell className="max-w-40 truncate text-muted-foreground">{e.note ?? ''}</TableCell>
               <TableCell className="text-right">
                 <span className="flex justify-end gap-2">
                   <Button

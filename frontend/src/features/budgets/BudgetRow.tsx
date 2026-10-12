@@ -97,14 +97,14 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
           {color && (
             <span
               aria-hidden="true"
-              className="size-3 shrink-0 rounded-full"
+              className="size-2.5 shrink-0 rounded-full"
               style={{ backgroundColor: color }}
             />
           )}
           {name}
         </span>
       </TableCell>
-      <TableCell className="text-right tabular-nums">
+      <TableCell className="text-right font-semibold tabular-nums">
         {saved === undefined ? (
           <span className="text-muted-foreground">Not set</span>
         ) : (
@@ -133,13 +133,14 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
               </p>
             )}
           </div>
-          <Button type="submit" disabled={saving} aria-label={`Save ${name} budget`}>
+          <Button type="submit" size="sm" disabled={saving} aria-label={`Save ${name} budget`}>
             {saving ? 'Saving…' : 'Save'}
           </Button>
           {saved !== undefined && (
             <Button
               type="button"
               variant="outline"
+              size="sm"
               disabled={removing || saving}
               onClick={() => void remove()}
               aria-label={`Remove ${name} budget`}
