@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -134,6 +136,61 @@ func TestProxyConfig(t *testing.T) {
 			}
 			if tc.wantWarn != "" && (len(warns) != 1 || !strings.Contains(warns[0], tc.wantWarn)) {
 				t.Errorf("got warnings %v, want one containing %q", warns, tc.wantWarn)
+			}
+		})
+	}
+}
+
+func TestRunMigrate(t *testing.T) {
+	t.Parallel()
+	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	withURL := env(map[string]string{"DATABASE_URL": "postgres://x"})
+	tests := []struct {
+		name       string
+		args       []string
+		getenv     func(string) string
+		revertName string
+		revertErr  error
+		wantCode   int
+		wantOut    string
+		wantErr    string
+		wantCalled bool
+	}{
+		{"no verb", nil, withURL, "", nil, 2, "", "status|up|down", false},
+		{"unknown verb", []string{"sideways"}, withURL, "", nil, 2, "", "status|up|down", false},
+		{"extra args", []string{"down", "2"}, withURL, "", nil, 2, "", "status|up|down", false},
+		{"usage before DATABASE_URL", []string{"x"}, env(nil), "", nil, 2, "", "status|up|down", false},
+		{"status not implemented", []string{"status"}, withURL, "", nil, 2, "", "not implemented", false},
+		{"up not implemented", []string{"up"}, withURL, "", nil, 2, "", "not implemented", false},
+		{"down without DATABASE_URL", []string{"down"}, env(nil), "", nil, 1, "", "DATABASE_URL is not set; set it to the PostgreSQL connection string", false},
+		{"down reverted", []string{"down"}, withURL, "0002_b", nil, 0, "reverted 0002_b\n", "", true},
+		{"down nothing", []string{"down"}, withURL, "", nil, 0, "nothing to revert\n", "", true},
+		{"down failure", []string{"down"}, withURL, "", errors.New("no down migration for 0002_b"), 1, "", "no down migration for 0002_b", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out, errOut strings.Builder
+			called := false
+			code := runMigrate(context.Background(), tc.args, &out, &errOut, tc.getenv,
+				func(ctx context.Context, url string) (string, error) {
+					called = true
+					if url != "postgres://x" {
+						t.Errorf("url = %q", url)
+					}
+					return tc.revertName, tc.revertErr
+				})
+			if code != tc.wantCode {
+				t.Errorf("code = %d, want %d", code, tc.wantCode)
+			}
+			if out.String() != tc.wantOut {
+				t.Errorf("stdout = %q, want %q", out.String(), tc.wantOut)
+			}
+			if !strings.Contains(errOut.String(), tc.wantErr) || (tc.wantErr == "" && errOut.Len() != 0) {
+				t.Errorf("stderr = %q, want containing %q", errOut.String(), tc.wantErr)
+			}
+			if called != tc.wantCalled {
+				t.Errorf("revert called = %v, want %v", called, tc.wantCalled)
 			}
 		})
 	}

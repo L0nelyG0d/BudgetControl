@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/netip"
@@ -58,10 +60,66 @@ func proxyConfig(proxiesValue, hopsValue string, trusted bool) (proxies []netip.
 	return proxies, hops, warnings, nil
 }
 
+const migrateUsage = "usage: budgetcontrol migrate status|up|down"
+
+const errNoDatabaseURL = "DATABASE_URL is not set; set it to the PostgreSQL connection string"
+
+// runMigrate implements `budgetcontrol migrate <verb>` and returns the exit
+// code: 0 success, 1 failure, 2 usage error. args are the arguments after
+// "migrate". Arguments are validated before the database is touched. revert
+// connects to the database at the given URL and reverts the latest
+// migration, returning its name ("" when nothing is applied).
+func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, getenv func(string) string,
+	revert func(ctx context.Context, dbURL string) (string, error)) int {
+	if len(args) != 1 || (args[0] != "status" && args[0] != "up" && args[0] != "down") {
+		fmt.Fprintln(stderr, migrateUsage)
+		return 2
+	}
+	switch args[0] {
+	case "down":
+		dbURL := getenv("DATABASE_URL")
+		if dbURL == "" {
+			fmt.Fprintln(stderr, errNoDatabaseURL)
+			return 1
+		}
+		name, err := revert(ctx, dbURL)
+		if err != nil {
+			fmt.Fprintf(stderr, "migrate down: %v\n", err)
+			return 1
+		}
+		if name == "" {
+			fmt.Fprintln(stdout, "nothing to revert")
+		} else {
+			fmt.Fprintf(stdout, "reverted %s\n", name)
+		}
+		return 0
+	default: // status, up: delivered by #32
+		fmt.Fprintf(stderr, "migrate %s: not implemented\n", args[0])
+		return 2
+	}
+}
+
+// revertLatest is the production revert used by `migrate down`.
+func revertLatest(ctx context.Context, dbURL string) (string, error) {
+	pool, err := db.Connect(ctx, dbURL)
+	if err != nil {
+		return "", err
+	}
+	defer pool.Close()
+	return db.RevertLatest(ctx, pool)
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		if os.Args[1] != "migrate" {
+			fmt.Fprintln(os.Stderr, "usage: budgetcontrol [migrate status|up|down]")
+			os.Exit(2)
+		}
+		os.Exit(runMigrate(context.Background(), os.Args[2:], os.Stdout, os.Stderr, os.Getenv, revertLatest))
+	}
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("DATABASE_URL is not set; set it to the PostgreSQL connection string")
+		log.Fatal(errNoDatabaseURL)
 	}
 	proxies, hops, warnings, err := proxyConfig(os.Getenv("TRUSTED_PROXIES"), os.Getenv("TRUSTED_PROXY_HOPS"), trustedProxy())
 	if err != nil {
