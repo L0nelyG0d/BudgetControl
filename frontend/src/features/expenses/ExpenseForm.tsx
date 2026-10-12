@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { api, ApiError } from '@/lib/api'
 import { validateAmount, parseAmount } from '@/lib/amount'
 import { useMaxAmount } from '@/lib/config'
+import { formatAmountValue, useAmountInput } from '@/lib/amountInput'
 import { todayISO, type Category, type Expense } from './expenses'
 
 export function ExpenseForm({
@@ -29,7 +30,7 @@ export function ExpenseForm({
 }) {
   const editing = expense !== undefined
   const maxAmount = useMaxAmount()
-  const [amount, setAmount] = useState(expense ? String(expense.amount) : '')
+  const [amount, setAmount] = useState(expense ? formatAmountValue(expense.amount) : '')
   const [categoryId, setCategoryId] = useState(() =>
     expense ? String(expense.category_id) : categories[0] ? String(categories[0].id) : '',
   )
@@ -39,6 +40,7 @@ export function ExpenseForm({
   const [amountError, setAmountError] = useState<string | null>(null)
   const [formError, setFormError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const amountInput = useAmountInput(setAmount, amount, () => setAmountError(null))
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -102,10 +104,7 @@ export function ExpenseForm({
             inputMode="numeric"
             autoComplete="off"
             value={amount}
-            onChange={(e) => {
-              setAmount(e.target.value)
-              setAmountError(null)
-            }}
+            {...amountInput}
             aria-invalid={amountError ? true : undefined}
             aria-describedby={amountError ? 'expense-amount-error' : undefined}
           />

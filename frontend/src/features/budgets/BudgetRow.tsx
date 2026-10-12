@@ -3,6 +3,7 @@ import { Check, Trash2, TriangleAlert } from 'lucide-react'
 import { api, ApiError } from '@/lib/api'
 import { validateAmount, parseAmount } from '@/lib/amount'
 import { useMaxAmount } from '@/lib/config'
+import { formatAmountValue, useAmountInput } from '@/lib/amountInput'
 import { formatMoney } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -26,11 +27,15 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
   const maxAmount = useMaxAmount()
   const errorId = `${inputId}-error`
   const [saved, setSaved] = useState<number | undefined>(initialAmount)
-  const [value, setValue] = useState(initialAmount === undefined ? '' : String(initialAmount))
+  const [value, setValue] = useState(initialAmount === undefined ? '' : formatAmountValue(initialAmount))
   const [fieldError, setFieldError] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [saving, setSaving] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const amountInput = useAmountInput(setValue, value, () => {
+    setFieldError(null)
+    setStatus({ kind: 'idle' })
+  })
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -48,7 +53,7 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
       const result = await api<Budget>(`/api/budgets?month=${month}`, { method: 'PUT', body })
       const amount = typeof result?.amount === 'number' ? result.amount : body.amount
       setSaved(amount)
-      setValue(String(amount))
+      setValue(formatAmountValue(amount))
       setStatus({ kind: 'saved' })
     } catch (err) {
       const message = err instanceof Error && err.message ? err.message : 'Could not save'
@@ -120,11 +125,7 @@ export function BudgetRow({ name, color, categoryId, month, initialAmount }: Pro
               value={value}
               aria-invalid={fieldError ? true : undefined}
               aria-describedby={fieldError ? errorId : undefined}
-              onChange={(e) => {
-                setValue(e.target.value)
-                setFieldError(null)
-                setStatus({ kind: 'idle' })
-              }}
+              {...amountInput}
             />
             {fieldError && (
               <p id={errorId} role="alert" className="text-xs text-destructive">

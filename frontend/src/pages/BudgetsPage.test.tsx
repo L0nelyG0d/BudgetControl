@@ -44,7 +44,7 @@ describe('BudgetsPage', () => {
     expect(await screen.findByText('October 2026')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/budgets?month=2026-10', expect.anything())
     expect(screen.getByLabelText('Overall budget in tenge')).toHaveValue('')
-    expect(screen.getByLabelText('Food budget in tenge')).toHaveValue('150000')
+    expect(screen.getByLabelText('Food budget in tenge')).toHaveValue('150 000')
     expect(screen.getByLabelText('Gym budget in tenge')).toHaveValue('')
     expect(screen.getByText(/150\s000\s₸/)).toBeInTheDocument()
   })
@@ -91,7 +91,7 @@ describe('BudgetsPage', () => {
     fireEvent.change(input, { target: { value: '1000' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
     expect(await screen.findByText(/Server broke/)).toBeInTheDocument()
-    expect(input).toHaveValue('1000')
+    expect(input).toHaveValue('1 000')
     expect(screen.queryByText('Saved')).not.toBeInTheDocument()
   })
 
@@ -108,7 +108,7 @@ describe('BudgetsPage', () => {
   it('removes a category budget', async () => {
     const fetchMock = mockApi([{ category_id: 1, amount: 150000 }])
     render(<BudgetsPage />)
-    expect(await screen.findByLabelText('Food budget in tenge')).toHaveValue('150000')
+    expect(await screen.findByLabelText('Food budget in tenge')).toHaveValue('150 000')
     expect(screen.queryByRole('button', { name: 'Remove Gym budget' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Remove Food budget' }))
     expect(await screen.findByText('Removed')).toBeInTheDocument()
@@ -138,7 +138,7 @@ describe('BudgetsPage', () => {
     await screen.findByLabelText('Food budget in tenge')
     fireEvent.click(screen.getByRole('button', { name: 'Remove Food budget' }))
     expect(await screen.findByText(/Server broke/)).toBeInTheDocument()
-    expect(screen.getByLabelText('Food budget in tenge')).toHaveValue('150000')
+    expect(screen.getByLabelText('Food budget in tenge')).toHaveValue('150 000')
     expect(screen.getByRole('button', { name: 'Remove Food budget' })).toBeInTheDocument()
   })
 
@@ -200,7 +200,7 @@ describe('BudgetsPage', () => {
         fireEvent.click(screen.getByRole('button', { name: `Save ${name} budget` }))
         await screen.findByText('Saved')
         expect(JSON.parse(putCalls(fetchMock)[0][1]!.body as string)).toMatchObject({ amount: 1500 })
-        expect(input).toHaveValue('1500')
+        expect(input).toHaveValue('1 500')
       },
     )
 
