@@ -106,7 +106,7 @@ Description: Amends #17 and the #17/#20 tests. Two constants: 5 failed logins pe
 
 ## 27. Frontend: accept thousands separators in amount fields
 Goal: Users can type `1 500` or `1,500` and it is accepted.
-Description: Follow-up to #23. Strip spaces and commas used as thousands separators before validating and sending; decimals are still rejected.
+Description: Follow-up to #23. One shared function in `amount.ts` (used by `validateAmount` and `parseAmount`, so both forms) accepts strictly grouped thousands: a first group of 1-3 digits not starting with `0`, then groups of exactly 3, joined by a space, NBSP (U+00A0), narrow NBSP (U+202F) or comma; plain digits work as before. `1 500` and `1,500` are sent as `1500`; `1,00`, `1,5`, `1500,5`, `1500.5`, `1.500`, `0,500`, `12 34`, `1,,000`, trailing/leading separators and `1 500 ₸` are rejected with the whole-number message. Surrounding whitespace from pasting is trimmed. Cap, empty, zero and negative rules apply to the cleaned value. Strict grouping is deliberate so a ru-KZ decimal comma is never read as thousands. Confirmed with the user: strict grouping, space and comma separators, mixed separators allowed, pasted `₸`/`KZT`/`тг` rejected. Out of scope: live grouping while typing (#34), pasted currency marker (#35), tiyn (plan).
 
 ## 28. Expose the amount limit from the backend to the frontend
 Goal: The frontend does not hard-code the amount limit.
@@ -131,3 +131,11 @@ Description: Follow-up to #25, which applies migrations only at startup. Design 
 ## 33. Backend: non-transactional migrations
 Goal: Migrations that cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`) can be applied safely.
 Description: Follow-up to #25, which runs everything in one transaction. Must define opt-out and recovery after a partial failure. Only when a real migration needs it.
+
+## 34. Frontend: live thousands grouping while typing in amount fields
+Goal: While the user types in an amount field, the digits are shown grouped (e.g. `1 500`) without moving the cursor unexpectedly.
+Description: Follow-up to #27. Design (grouping character, cursor and paste behavior) to be agreed with the user first; only if the user wants it.
+
+## 35. Frontend: accept a currency marker when pasting an amount
+Goal: A value pasted from the app's own display, such as `1 500 ₸`, is accepted in amount fields.
+Description: Follow-up to #27, which rejects `₸`, `KZT` and `тг`. Must define which markers are stripped and where. Only if the user wants it.

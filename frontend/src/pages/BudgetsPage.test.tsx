@@ -189,6 +189,32 @@ describe('BudgetsPage', () => {
       expect(JSON.parse(putCalls(fetchMock)[0][1]!.body as string)).toEqual({ category_id: 1, amount: 7 })
     })
 
+    it.each(rows.flatMap(([name, label]) => ['1 500', '1,500', '1\u00A0500', '1\u202F500', ' 1 500\n'].map((raw) => [name, label, raw])))(
+      '%s: %j is sent as 1500 and the input shows 1500 after saving',
+      async (name, label, raw) => {
+        const fetchMock = mockApi([], () => json(200, { category_id: name === 'Overall' ? null : 1, amount: 1500 }))
+        render(<BudgetsPage />)
+        const input = await screen.findByLabelText(label)
+        fireEvent.change(input, { target: { value: raw } })
+        fireEvent.click(screen.getByRole('button', { name: `Save ${name} budget` }))
+        await screen.findByText('Saved')
+        expect(JSON.parse(putCalls(fetchMock)[0][1]!.body as string)).toMatchObject({ amount: 1500 })
+        expect(input).toHaveValue('1500')
+      },
+    )
+
+    it.each(['1,00', '1,5', '1.500', '12 34', '1  000', '0,500', '1 500 ₸', '500,'])(
+      'rejects %j with the whole-number message and no request',
+      async (raw) => {
+        const fetchMock = mockApi([])
+        render(<BudgetsPage />)
+        fireEvent.change(await screen.findByLabelText('Food budget in tenge'), { target: { value: raw } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save Food budget' }))
+        expect(await screen.findByText('Amount must be a whole number greater than 0.')).toBeInTheDocument()
+        expect(putCalls(fetchMock)).toHaveLength(0)
+      },
+    )
+
     it('negative above the cap shows the whole-number message, not the cap', async () => {
       const fetchMock = mockApi([])
       render(<BudgetsPage />)

@@ -286,6 +286,30 @@ describe('ExpensesPage', () => {
       expect(JSON.parse(String(calls(fetchMock, method)[0][1]?.body)).amount).toBe(7)
     })
 
+    it.each(modes.flatMap((m) => [['1 500'], ['1,500'], ['1\u00A0500'], ['1\u202F500'], [' 1 500\n']].map(([raw]) => ({ ...m, raw }))))(
+      '$mode: $raw is sent as 1500',
+      async ({ mode, button, method, raw }) => {
+        const fetchMock = await open(mode, (url, init) =>
+          init?.method === 'POST' ? json(201, { ...edited, id: 3, amount: 1500 }) : withPut(() => json(200, { ...edited, amount: 1500 }))(url, init),
+        )
+        fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: raw } })
+        fireEvent.click(screen.getByRole('button', { name: button }))
+        await waitFor(() => expect(calls(fetchMock, method)).toHaveLength(1))
+        expect(JSON.parse(String(calls(fetchMock, method)[0][1]?.body)).amount).toBe(1500)
+      },
+    )
+
+    it.each(['1,00', '1,5', '1.500', '12 34', '1  000', '0,500', '1 500 ₸', '500,'])(
+      'rejects %j with the whole-number message and no request',
+      async (raw) => {
+        const fetchMock = await open('add', standard(existing))
+        fireEvent.change(screen.getByLabelText(/^Amount/), { target: { value: raw } })
+        fireEvent.click(screen.getByRole('button', { name: 'Add expense' }))
+        expect(await screen.findByText('Amount must be a whole number greater than 0.')).toBeInTheDocument()
+        expect(postsTo(fetchMock)).toHaveLength(0)
+      },
+    )
+
     it.each([
       ['', 'Enter an amount.'],
       ['   ', 'Enter an amount.'],

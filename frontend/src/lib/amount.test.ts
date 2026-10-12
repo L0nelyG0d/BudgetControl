@@ -24,11 +24,57 @@ describe('validateAmount', () => {
     ['1500,5', wholeMessage],
     ['abc', wholeMessage],
     ['1e3', wholeMessage],
+    ['1 500', null],
+    ['1,500', null],
+    ['1 000', null],
+    ['12 345 678', null],
+    ['1,234,567', null],
+    ['1\u00A0500', null],
+    ['1\u202F500', null],
+    [' 1 500\n', null],
+    ['\t1,500 ', null],
+    ['1 000,500', null],
+    ['1 000 000 000 000', null],
+    ['1,000,000,000,000', null],
+    ['1 000 000 000 001', capMessage],
+    ['1,000,000,000,001', capMessage],
+    ['1,00', wholeMessage],
+    ['1,5', wholeMessage],
+    ['1.500', wholeMessage],
+    ['1,0000', wholeMessage],
+    ['12 34', wholeMessage],
+    ['1 5000', wholeMessage],
+    [',500', wholeMessage],
+    ['500,', wholeMessage],
+    ['1,,000', wholeMessage],
+    ['1  000', wholeMessage],
+    ['1 , 000', wholeMessage],
+    ['0,500', wholeMessage],
+    ['0 500', wholeMessage],
+    ['01,000', wholeMessage],
+    ['0 000', wholeMessage],
+    ['-1 500', wholeMessage],
+    ['1 500 ₸', wholeMessage],
+    ['1 500 abc', wholeMessage],
+    ['1\t500', wholeMessage],
+    ['1\n500', wholeMessage],
   ])('%j -> %j', (raw, want) => {
     expect(validateAmount(raw)).toBe(want)
   })
 
   it('parses with leading zeros and spaces', () => {
     expect(parseAmount(' 007 ')).toBe(7)
+  })
+
+  it.each([
+    ['1 500', 1500],
+    ['1,500', 1500],
+    ['12 345 678', 12345678],
+    ['1\u00A0500', 1500],
+    ['1\u202F500', 1500],
+    [' 1 500\n', 1500],
+    ['1500', 1500],
+  ])('parseAmount %j -> %j', (raw, want) => {
+    expect(parseAmount(raw)).toBe(want)
   })
 })
