@@ -38,20 +38,29 @@ func trustedProxies(value string) ([]netip.Prefix, error) {
 	return api.ParseTrustedProxies(value)
 }
 
-// proxyConfig parses TRUSTED_PROXIES and TRUSTED_PROXY_HOPS. It returns the
-// list, the hop count (0 if unset), warnings to log, or an error that stops
-// the server. Setting both is an error even when trusted is false.
-func proxyConfig(proxiesValue, hopsValue string, trusted bool) (proxies []netip.Prefix, hops int, warnings []string, err error) {
+// proxyConfig parses TRUSTED_PROXIES, TRUSTED_PROXY_HOPS and
+// TRUSTED_PROXY_HEADER. It returns the list, the hop count (0 if unset), the
+// canonical header name ("" if unset or X-Forwarded-For), warnings to log, or
+// an error that stops the server. Setting the hop count together with the
+// list, or with another header, is an error even when trusted is false.
+func proxyConfig(proxiesValue, hopsValue, headerValue string, trusted bool) (proxies []netip.Prefix, hops int, header string, warnings []string, err error) {
 	proxies, err = trustedProxies(proxiesValue)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, "", nil, err
 	}
 	hops, err = api.ParseTrustedProxyHops(hopsValue)
 	if err != nil {
-		return nil, 0, nil, err
+		return nil, 0, "", nil, err
+	}
+	header, err = api.ParseTrustedProxyHeader(headerValue)
+	if err != nil {
+		return nil, 0, "", nil, err
 	}
 	if hops > 0 && len(proxies) > 0 {
-		return nil, 0, nil, errors.New("only one of TRUSTED_PROXIES and TRUSTED_PROXY_HOPS may be set")
+		return nil, 0, "", nil, errors.New("only one of TRUSTED_PROXIES and TRUSTED_PROXY_HOPS may be set")
+	}
+	if hops > 0 && header != "" {
+		return nil, 0, "", nil, errors.New("only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set")
 	}
 	if len(proxies) > 0 && !trusted {
 		warnings = append(warnings, "warning: TRUSTED_PROXIES is set but TRUSTED_PROXY is not true; the list is ignored")
@@ -59,7 +68,10 @@ func proxyConfig(proxiesValue, hopsValue string, trusted bool) (proxies []netip.
 	if hops > 0 && !trusted {
 		warnings = append(warnings, "warning: TRUSTED_PROXY_HOPS is set but TRUSTED_PROXY is not true; the hop count is ignored")
 	}
-	return proxies, hops, warnings, nil
+	if header != "" && !trusted {
+		warnings = append(warnings, "warning: TRUSTED_PROXY_HEADER is set but TRUSTED_PROXY is not true; the header setting is ignored")
+	}
+	return proxies, hops, header, warnings, nil
 }
 
 const migrateUsage = "usage: budgetcontrol migrate status|up|down"
@@ -180,7 +192,7 @@ func main() {
 	if dbURL == "" {
 		log.Fatal(errNoDatabaseURL)
 	}
-	proxies, hops, warnings, err := proxyConfig(os.Getenv("TRUSTED_PROXIES"), os.Getenv("TRUSTED_PROXY_HOPS"), trustedProxy())
+	proxies, hops, header, warnings, err := proxyConfig(os.Getenv("TRUSTED_PROXIES"), os.Getenv("TRUSTED_PROXY_HOPS"), os.Getenv("TRUSTED_PROXY_HEADER"), trustedProxy())
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -188,11 +200,12 @@ func main() {
 		log.Print(w)
 	}
 	deps := api.Deps{
-		JWTSecret:        []byte(os.Getenv("JWT_SECRET")),
-		Production:       os.Getenv("APP_ENV") == "production",
-		TrustedProxy:     trustedProxy(),
-		TrustedProxies:   proxies,
-		TrustedProxyHops: hops,
+		JWTSecret:          []byte(os.Getenv("JWT_SECRET")),
+		Production:         os.Getenv("APP_ENV") == "production",
+		TrustedProxy:       trustedProxy(),
+		TrustedProxies:     proxies,
+		TrustedProxyHops:   hops,
+		TrustedProxyHeader: header,
 	}
 	if err := deps.Validate(); err != nil {
 		log.Fatal(err)

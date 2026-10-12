@@ -96,11 +96,12 @@ func TestTrustedProxies(t *testing.T) {
 func TestProxyConfig(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name, proxies, hops string
-		trusted             bool
-		wantHops, wantList  int
-		wantWarn            string
-		wantErr             string
+		name, proxies, hops, header string
+		trusted                     bool
+		wantHops, wantList          int
+		wantHeader                  string
+		wantWarn                    string
+		wantErr                     string
 	}{
 		{name: "both unset", trusted: true},
 		{name: "hops with trust", hops: "2", trusted: true, wantHops: 2},
@@ -115,11 +116,31 @@ func TestProxyConfig(t *testing.T) {
 		{name: "both set", hops: "2", proxies: "10.0.0.1", trusted: true, wantErr: "only one of"},
 		{name: "both set without trust", hops: "2", proxies: "10.0.0.1", wantErr: "only one of"},
 		{name: "blank list and hops ok", hops: "1", proxies: "  ", trusted: true, wantHops: 1},
+		{name: "header unset", header: "", trusted: true},
+		{name: "header spaces only", header: "   ", trusted: true},
+		{name: "header x-real-ip", header: "X-Real-IP", trusted: true, wantHeader: "X-Real-Ip"},
+		{name: "header cf", header: "CF-Connecting-IP", trusted: true, wantHeader: "Cf-Connecting-Ip"},
+		{name: "header true-client", header: "True-Client-IP", trusted: true, wantHeader: "True-Client-Ip"},
+		{name: "header any case and spaces", header: " x-real-ip ", trusted: true, wantHeader: "X-Real-Ip"},
+		{name: "header xff is unset", header: "x-forwarded-for", trusted: true},
+		{name: "header xff with hops ok", header: "X-Forwarded-For", hops: "2", trusted: true, wantHops: 2},
+		{name: "header xff without trust no warning", header: "X-Forwarded-For"},
+		{name: "header with list ok", header: "X-Real-IP", proxies: "10.0.0.0/8", trusted: true, wantList: 1, wantHeader: "X-Real-Ip"},
+		{name: "header without trust warns", header: "X-Real-IP", wantHeader: "X-Real-Ip", wantWarn: "TRUSTED_PROXY_HEADER is set but TRUSTED_PROXY is not true; the header setting is ignored"},
+		{name: "header with hops", header: "X-Real-IP", hops: "2", trusted: true, wantErr: "only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set"},
+		{name: "header with hops without trust", header: "X-Real-IP", hops: "2", wantErr: "only one of TRUSTED_PROXY_HEADER and TRUSTED_PROXY_HOPS may be set"},
+		{name: "header space inside", header: "X Real IP", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "X Real IP"`},
+		{name: "header colon", header: "X-Real-IP:", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "X-Real-IP:"`},
+		{name: "header space dash", header: "X-Real IP", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "X-Real IP"`},
+		{name: "header non-ascii", header: "X-Réal-IP", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "X-Réal-IP"`},
+		{name: "header comma", header: "a,b", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "a,b"`},
+		{name: "header two names", header: "X-Real-IP, CF-Connecting-IP", trusted: true, wantErr: `invalid TRUSTED_PROXY_HEADER "X-Real-IP, CF-Connecting-IP"`},
+		{name: "invalid header without trust still fails", header: "a,b", wantErr: `invalid TRUSTED_PROXY_HEADER "a,b"`},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			list, hops, warns, err := proxyConfig(tc.proxies, tc.hops, tc.trusted)
+			list, hops, header, warns, err := proxyConfig(tc.proxies, tc.hops, tc.header, tc.trusted)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("got err %v, want containing %q", err, tc.wantErr)
@@ -131,6 +152,9 @@ func TestProxyConfig(t *testing.T) {
 			}
 			if hops != tc.wantHops || len(list) != tc.wantList {
 				t.Errorf("got hops %d, list %d; want %d, %d", hops, len(list), tc.wantHops, tc.wantList)
+			}
+			if header != tc.wantHeader {
+				t.Errorf("got header %q, want %q", header, tc.wantHeader)
 			}
 			if tc.wantWarn == "" && len(warns) != 0 {
 				t.Errorf("unexpected warnings %v", warns)
