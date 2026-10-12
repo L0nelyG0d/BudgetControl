@@ -25,11 +25,16 @@ const schemaLockID = 727001
 
 var migrationName = regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.sql$`)
 
+// downName matches NNNN_description.down.sql. It cannot match migrationName
+// (the description has no dot), so the two kinds of file are told apart.
+var downName = regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.down\.sql$`)
+
 type migration struct {
 	version  int64
 	name     string // file name
 	sql      string
 	checksum string // hex SHA-256 of the exact file bytes
+	downFile string // name of the matching NNNN_description.down.sql, "" if none
 }
 
 // ApplySchema applies the embedded migrations that the database has not seen
@@ -43,7 +48,9 @@ func ApplySchema(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // loadMigrations reads and validates the migration files in fsys (flat
-// directory of NNNN_description.sql). The result is sorted by version and is
+// directory of NNNN_description.sql, optionally with a matching
+// NNNN_description.down.sql). Down files are only matched to their up file
+// here; they are not read or checksummed. The result is sorted by version and is
 // contiguous from 1.
 func loadMigrations(fsys fs.FS) ([]migration, error) {
 	entries, err := fs.ReadDir(fsys, ".")
@@ -52,7 +59,12 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 	}
 	var out []migration
 	byVersion := map[int64]string{}
+	var downs []string
 	for _, e := range entries {
+		if downName.MatchString(e.Name()) && !e.IsDir() {
+			downs = append(downs, e.Name())
+			continue
+		}
 		m := migrationName.FindStringSubmatch(e.Name())
 		if m == nil || e.IsDir() {
 			return nil, fmt.Errorf("migration file %q: name must match NNNN_description.sql", e.Name())
@@ -73,6 +85,22 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 	for i, m := range out {
 		if want := int64(i + 1); m.version != want {
 			return nil, fmt.Errorf("migration file %q: gap in versions, expected version %d", m.name, want)
+		}
+	}
+	for _, d := range downs {
+		up := strings.TrimSuffix(d, ".down.sql") + ".sql"
+		if d[:4] == "0001" {
+			return nil, fmt.Errorf("down file %q: 0001 is the baseline and cannot be reverted", d)
+		}
+		found := false
+		for i := range out {
+			if out[i].name == up {
+				out[i].downFile = d
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("down file %q has no matching up file %q", d, up)
 		}
 	}
 	return out, nil
@@ -117,21 +145,8 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) error 
 		}
 		applied[migs[0].version] = migs[0].checksum
 	} else {
-		rows, err := tx.Query(ctx, `SELECT version, checksum FROM schema_migrations`)
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var v int64
-			var sum string
-			if err := rows.Scan(&v, &sum); err != nil {
-				rows.Close()
-				return err
-			}
-			applied[v] = sum
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		var err error
+		if applied, err = readApplied(ctx, tx); err != nil {
 			return err
 		}
 	}
@@ -192,4 +207,98 @@ func record(ctx context.Context, tx pgx.Tx, m migration) error {
 		`INSERT INTO schema_migrations (version, name, checksum) VALUES ($1, $2, $3)`,
 		m.version, strings.TrimSuffix(m.name, ".sql"), m.checksum)
 	return err
+}
+
+// readApplied returns version -> recorded checksum from schema_migrations,
+// which must exist.
+func readApplied(ctx context.Context, tx pgx.Tx) (map[int64]string, error) {
+	rows, err := tx.Query(ctx, `SELECT version, checksum FROM schema_migrations`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	applied := map[int64]string{}
+	for rows.Next() {
+		var v int64
+		var sum string
+		if err := rows.Scan(&v, &sum); err != nil {
+			return nil, err
+		}
+		applied[v] = sum
+	}
+	return applied, rows.Err()
+}
+
+// RevertLatest reverts the latest applied embedded migration; see
+// RevertMigration. It is only called by the `migrate down` command, never at
+// server startup.
+func RevertLatest(ctx context.Context, pool *pgxpool.Pool) (string, error) {
+	sub, err := fs.Sub(embeddedMigrations, "migrations")
+	if err != nil {
+		return "", err
+	}
+	return RevertMigration(ctx, pool, sub)
+}
+
+// RevertMigration reverts only the single latest applied migration of fsys:
+// it runs its down file and deletes its schema_migrations row in one
+// transaction under the schema advisory lock, and returns the migration name
+// (e.g. "0002_add_tags"). It returns "" and no error when nothing is applied;
+// in that case it creates nothing and does not adopt a legacy database. It
+// refuses, changing nothing, on the same inconsistencies as ApplyMigrations,
+// when the latest migration is 0001, or when it has no down file.
+func RevertMigration(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (string, error) {
+	migs, err := loadMigrations(fsys)
+	if err != nil {
+		return "", err
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockID); err != nil {
+		return "", err
+	}
+	var hasTracking bool
+	if err := tx.QueryRow(ctx, `SELECT to_regclass('schema_migrations') IS NOT NULL`).Scan(&hasTracking); err != nil {
+		return "", err
+	}
+	if !hasTracking {
+		return "", nil
+	}
+	applied, err := readApplied(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	if len(applied) == 0 {
+		return "", nil
+	}
+	if err := checkApplied(migs, applied); err != nil {
+		return "", err
+	}
+	// checkApplied guarantees every applied version is known, contiguous
+	// from 1, so the latest is migs[len(applied)-1].
+	latest := migs[len(applied)-1]
+	base := strings.TrimSuffix(latest.name, ".sql")
+	if latest.version == 1 {
+		return "", fmt.Errorf("%s cannot be reverted", base)
+	}
+	if latest.downFile == "" {
+		return "", fmt.Errorf("no down migration for %s", base)
+	}
+	body, err := fs.ReadFile(fsys, latest.downFile)
+	if err != nil {
+		return "", fmt.Errorf("read migration %s: %w", latest.downFile, err)
+	}
+	if _, err := tx.Exec(ctx, string(body)); err != nil {
+		return "", fmt.Errorf("migration %s: %w", latest.downFile, err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version = $1`, latest.version); err != nil {
+		return "", fmt.Errorf("migration %s: %w", latest.downFile, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return base, nil
 }

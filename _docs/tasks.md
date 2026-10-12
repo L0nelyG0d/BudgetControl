@@ -121,16 +121,16 @@ Goal: With TRUSTED_PROXY enabled, an operator can set the number of proxies in f
 Description: Follow-up to #24. Add `TRUSTED_PROXY_HOPS=N` (integer 1-64, spaces trimmed): the client IP is the Nth entry from the right of the joined `X-Forwarded-For` chain (N=1 equals the #20 default). A chain shorter than N, or a malformed Nth entry, falls back to the remote address. Zero, negative, non-numeric or above 64 fails startup with `invalid TRUSTED_PROXY_HOPS "<value>"`; setting it together with `TRUSTED_PROXIES` also fails startup; setting it without `TRUSTED_PROXY=true` logs a warning and is ignored. The remote address is not checked in this mode. Go tests for `clientIP` and startup validation, and `_docs/plan.md` documents it. Out of scope: combining with the address list (#38), logging fallbacks (#39), other proxy headers (#29). Decisions made while grooming, see the issue Constraints.
 
 ## 31. Backend: down (rollback) migrations
-Goal: A migration can be undone in a controlled way.
-Description: Follow-up to #25, which is forward-only. Design (format, invocation outside startup, effect on `schema_migrations`) to be agreed with the user first; only if the user wants it.
+Goal: An operator can undo the latest applied migration with `budgetcontrol migrate down`, never as a side effect of starting the server.
+Description: Follow-up to #25. Adds the `migrate status|up|down` subcommand dispatch of the existing binary (reads only `DATABASE_URL`, exit codes 0/1/2; `status` and `up` are completed in #32). Down files are embedded `NNNN_name.down.sql` next to the up file; a down file without an up file fails loading; `0001` has none. `down` reverts only the single latest applied migration in one transaction under the advisory lock and deletes its `schema_migrations` row; a missing down file, a checksum mismatch, a newer-than-binary database or a hole is an error that changes nothing; nothing applied prints `nothing to revert` and does not create the table or adopt a legacy database. The server never runs down. Go tests, and `_docs/plan.md` documents it (including that starting the server after `down` re-applies). Out of scope: several steps or a target version (#40), confirmation/production guard (#41), status and `up` (#32), non-transactional (#33). Decisions made while grooming, see the issue Constraints.
 
 ## 32. Backend: migration status and apply-only command
 Goal: An operator can see applied and pending migrations and run them without starting the server.
-Description: Follow-up to #25, which applies migrations only at startup. Design to be agreed with the user first; standard library only.
+Description: Follow-up to #25, which applies migrations only at startup. Provides the `migrate status` and `migrate up` verbs of the subcommand created in #31 (shared decisions: only `DATABASE_URL`, `up` reuses `ApplyMigrations`, `status` is read-only and exits 1 on mismatch). Still to be groomed; standard library only. Out of scope: JSON output (#42).
 
 ## 33. Backend: non-transactional migrations
 Goal: Migrations that cannot run in a transaction (e.g. `CREATE INDEX CONCURRENTLY`) can be applied safely.
-Description: Follow-up to #25, which runs everything in one transaction. Must define opt-out and recovery after a partial failure. Only when a real migration needs it.
+Description: Follow-up to #25, which runs everything in one transaction. Must define opt-out and recovery after a partial failure, and how `down`/`status` (#31/#32) treat such a migration. Only when a real migration needs it.
 
 ## 34. Frontend: live thousands grouping while typing in amount fields
 Goal: While the user types in an amount field, the digits are shown grouped (e.g. `1 500`) without moving the cursor unexpectedly.
@@ -155,3 +155,15 @@ Description: Follow-up to #30, where setting both is a startup error. Design to 
 ## 39. Backend: log client IP fallbacks behind a trusted proxy
 Goal: An operator can see when the proxy setup does not match the configured hop count.
 Description: Follow-up to #30. Log (rate limited) when the client IP falls back to the remote address. Design to be agreed with the user first; standard library only.
+
+## 40. Backend: migrate down for several steps or to a target version
+Goal: An operator can revert more than one migration in a single run.
+Description: Follow-up to #31, which reverts only the latest. Design to be agreed with the user first; standard library only.
+
+## 41. Backend: safety guard for destructive migrate down
+Goal: `migrate down` cannot be run against production by accident.
+Description: Follow-up to #31, whose `down` runs without confirmation. Decide on a confirmation flag or an `APP_ENV=production` refusal. Design to be agreed with the user first; standard library only.
+
+## 42. Backend: machine-readable output for migrate status
+Goal: Scripts can read migration status without parsing text.
+Description: Follow-up to #31/#32. Optional `--json` output. Design to be agreed with the user first; standard library only.

@@ -354,3 +354,296 @@ func TestApplySchemaFreshMatchesOldSchema(t *testing.T) {
 		t.Errorf("fresh schema differs from old schema.sql:\n--- fresh\n%s\n--- old\n%s", a, b)
 	}
 }
+
+// downSet is three migrations with down files for 2 and 3.
+func downSet() map[string]string {
+	return map[string]string{
+		"0001_a.sql":      "CREATE TABLE a (n INT)",
+		"0002_b.sql":      "CREATE TABLE b (n INT)",
+		"0002_b.down.sql": "DROP TABLE b",
+		"0003_c.sql":      "CREATE TABLE c (n INT)",
+		"0003_c.down.sql": "DROP TABLE c",
+	}
+}
+
+func tableExists(t *testing.T, pool *pgxpool.Pool, name string) bool {
+	t.Helper()
+	return count(t, pool, `SELECT count(*) FROM pg_tables WHERE schemaname = current_schema() AND tablename = $1`, name) == 1
+}
+
+func versions(t *testing.T, pool *pgxpool.Pool) string {
+	t.Helper()
+	var s *string
+	if err := pool.QueryRow(context.Background(), `SELECT string_agg(version::text, ',' ORDER BY version) FROM schema_migrations`).Scan(&s); err != nil {
+		t.Fatal(err)
+	}
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// Invalid down sets are rejected while loading, before any database use.
+func TestMigrationsInvalidDownFiles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		fs      fstest.MapFS
+		wantErr []string
+	}{
+		{"down without up", files(map[string]string{"0001_a.sql": "SELECT 1", "0002_x.down.sql": "SELECT 1"}), []string{"0002_x.down.sql"}},
+		{"different description", files(map[string]string{"0001_a.sql": "SELECT 1", "0002_x.sql": "SELECT 1", "0002_y.down.sql": "SELECT 1"}), []string{"0002_y.down.sql"}},
+		{"baseline down", files(map[string]string{"0001_a.sql": "SELECT 1", "0001_a.down.sql": "SELECT 1"}), []string{"0001_a.down.sql", "0001"}},
+		{"uppercase down", files(map[string]string{"0001_a.sql": "SELECT 1", "0002_B.down.sql": "SELECT 1"}), []string{"0002_B.down.sql"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for name, call := range map[string]func() error{
+				"apply": func() error { return db.ApplyMigrations(context.Background(), (*pgxpool.Pool)(nil), tc.fs) },
+				"revert": func() error {
+					_, err := db.RevertMigration(context.Background(), (*pgxpool.Pool)(nil), tc.fs)
+					return err
+				},
+			} {
+				err := call()
+				if err == nil {
+					t.Fatalf("%s: want error, got nil", name)
+				}
+				for _, w := range tc.wantErr {
+					if !strings.Contains(err.Error(), w) {
+						t.Errorf("%s: error %q does not contain %q", name, err, w)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestApplyMigrationsIgnoresDownFiles(t *testing.T) {
+	pool, _ := schemaPool(t)
+	ctx := context.Background()
+	// A down file that would fail if it were ever run.
+	set := downSet()
+	set["0003_c.down.sql"] = "THIS IS NOT SQL"
+	if err := db.ApplyMigrations(ctx, pool, files(set)); err != nil {
+		t.Fatal(err)
+	}
+	if got := versions(t, pool); got != "1,2,3" {
+		t.Errorf("versions = %q", got)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM schema_migrations WHERE name LIKE '%down%'`); n != 0 {
+		t.Errorf("down files recorded: %d", n)
+	}
+	// An up-only set still applies.
+	pool2, _ := schemaPool(t)
+	if err := db.ApplyMigrations(ctx, pool2, files(map[string]string{"0001_a.sql": "SELECT 1", "0002_b.sql": "SELECT 1"})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRevertMigration(t *testing.T) {
+	pool, _ := schemaPool(t)
+	ctx := context.Background()
+	fs := files(downSet())
+	if err := db.ApplyMigrations(ctx, pool, fs); err != nil {
+		t.Fatal(err)
+	}
+
+	name, err := db.RevertMigration(ctx, pool, fs)
+	if err != nil || name != "0003_c" {
+		t.Fatalf("first revert = %q, %v", name, err)
+	}
+	if got := versions(t, pool); got != "1,2" {
+		t.Errorf("versions = %q, want 1,2", got)
+	}
+	if tableExists(t, pool, "c") || !tableExists(t, pool, "b") {
+		t.Error("only table c should be gone")
+	}
+
+	// Applying again re-applies and records it with its checksum.
+	if err := db.ApplyMigrations(ctx, pool, fs); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("CREATE TABLE c (n INT)"))
+	var got string
+	if err := pool.QueryRow(ctx, `SELECT checksum FROM schema_migrations WHERE version = 3`).Scan(&got); err != nil || got != hex.EncodeToString(sum[:]) {
+		t.Errorf("re-applied checksum %q, %v", got, err)
+	}
+
+	// Again: one step per run, the next latest each time.
+	for _, want := range []string{"0003_c", "0002_b"} {
+		name, err := db.RevertMigration(ctx, pool, fs)
+		if err != nil || name != want {
+			t.Fatalf("revert = %q, %v; want %q", name, err, want)
+		}
+	}
+	if got := versions(t, pool); got != "1" {
+		t.Errorf("versions = %q, want 1", got)
+	}
+	// Only 0001 left.
+	_, err = db.RevertMigration(ctx, pool, fs)
+	if err == nil || !strings.Contains(err.Error(), "0001_a cannot be reverted") {
+		t.Errorf("err = %v", err)
+	}
+	if got := versions(t, pool); got != "1" || !tableExists(t, pool, "a") {
+		t.Errorf("state changed: versions %q", got)
+	}
+}
+
+func TestRevertMigrationRefusals(t *testing.T) {
+	tests := []struct {
+		name    string
+		fs      map[string]string // set passed to RevertMigration; nil = downSet
+		prepare func(t *testing.T, pool *pgxpool.Pool)
+		want    string
+	}{
+		{"no down file for latest", map[string]string{
+			"0001_a.sql": "CREATE TABLE a (n INT)", "0002_b.sql": "CREATE TABLE b (n INT)",
+			"0003_c.sql": "CREATE TABLE c (n INT)", "0002_b.down.sql": "DROP TABLE b",
+		}, nil, "no down migration for 0003_c"},
+		{"middle down file not used while later applied", map[string]string{
+			"0001_a.sql": "CREATE TABLE a (n INT)", "0002_b.sql": "CREATE TABLE b (n INT)",
+			"0003_c.sql": "CREATE TABLE c (n INT)", "0002_b.down.sql": "DROP TABLE b",
+		}, nil, "no down migration for 0003_c"},
+		{"modified older migration", map[string]string{
+			"0001_a.sql": "CREATE TABLE a (n INT, x INT)", "0002_b.sql": "CREATE TABLE b (n INT)",
+			"0003_c.sql": "CREATE TABLE c (n INT)", "0003_c.down.sql": "DROP TABLE c",
+		}, nil, "modified after it was applied"},
+		{"modified latest migration", map[string]string{
+			"0001_a.sql": "CREATE TABLE a (n INT)", "0002_b.sql": "CREATE TABLE b (n INT)",
+			"0003_c.sql": "CREATE TABLE c (n INT, x INT)", "0003_c.down.sql": "DROP TABLE c",
+		}, nil, "modified after it was applied"},
+		{"newer than binary", nil, func(t *testing.T, pool *pgxpool.Pool) {
+			if _, err := pool.Exec(context.Background(), `INSERT INTO schema_migrations (version, name, checksum) VALUES (9, '0009_future', 'x')`); err != nil {
+				t.Fatal(err)
+			}
+		}, "newer than this binary"},
+		{"hole", nil, func(t *testing.T, pool *pgxpool.Pool) {
+			if _, err := pool.Exec(context.Background(), `DELETE FROM schema_migrations WHERE version = 2`); err != nil {
+				t.Fatal(err)
+			}
+		}, "hole in applied migrations"},
+		{"failing down SQL rolls back", map[string]string{
+			"0001_a.sql": "CREATE TABLE a (n INT)", "0002_b.sql": "CREATE TABLE b (n INT)",
+			"0003_c.sql": "CREATE TABLE c (n INT)", "0003_c.down.sql": "DROP TABLE c; DROP TABLE no_such_table",
+		}, nil, "0003_c.down.sql"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pool, _ := schemaPool(t)
+			ctx := context.Background()
+			if err := db.ApplyMigrations(ctx, pool, files(downSet())); err != nil {
+				t.Fatal(err)
+			}
+			if tc.prepare != nil {
+				tc.prepare(t, pool)
+			}
+			before := versions(t, pool)
+			set := tc.fs
+			if set == nil {
+				set = downSet()
+			}
+			name, err := db.RevertMigration(ctx, pool, files(set))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want containing %q", err, tc.want)
+			}
+			if name != "" {
+				t.Errorf("name = %q on error", name)
+			}
+			if after := versions(t, pool); after != before {
+				t.Errorf("versions %q -> %q, want unchanged", before, after)
+			}
+			for _, tbl := range []string{"a", "b", "c"} {
+				if tbl == "b" && tc.name == "hole" {
+					continue
+				}
+				if !tableExists(t, pool, tbl) {
+					t.Errorf("table %s was dropped", tbl)
+				}
+			}
+		})
+	}
+}
+
+func TestRevertMigrationNothingApplied(t *testing.T) {
+	ctx := context.Background()
+	t.Run("no table", func(t *testing.T) {
+		pool, _ := schemaPool(t)
+		name, err := db.RevertMigration(ctx, pool, files(downSet()))
+		if err != nil || name != "" {
+			t.Fatalf("got %q, %v", name, err)
+		}
+		if tableExists(t, pool, "schema_migrations") {
+			t.Error("schema_migrations was created")
+		}
+	})
+	t.Run("legacy database is not adopted", func(t *testing.T) {
+		pool, _ := schemaPool(t)
+		if _, err := pool.Exec(ctx, `CREATE TABLE users (id INT)`); err != nil {
+			t.Fatal(err)
+		}
+		name, err := db.RevertMigration(ctx, pool, files(downSet()))
+		if err != nil || name != "" {
+			t.Fatalf("got %q, %v", name, err)
+		}
+		if tableExists(t, pool, "schema_migrations") {
+			t.Error("legacy database was adopted")
+		}
+	})
+	t.Run("empty table", func(t *testing.T) {
+		pool, _ := schemaPool(t)
+		if err := db.ApplyMigrations(ctx, pool, files(downSet())); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM schema_migrations`); err != nil {
+			t.Fatal(err)
+		}
+		name, err := db.RevertMigration(ctx, pool, files(downSet()))
+		if err != nil || name != "" {
+			t.Fatalf("got %q, %v", name, err)
+		}
+	})
+}
+
+func TestRevertMigrationConcurrent(t *testing.T) {
+	pool, _ := schemaPool(t)
+	ctx := context.Background()
+	fs := files(downSet())
+	if err := db.ApplyMigrations(ctx, pool, fs); err != nil {
+		t.Fatal(err)
+	}
+	type result struct {
+		name string
+		err  error
+	}
+	res := make(chan result, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			n, err := db.RevertMigration(ctx, pool, fs)
+			res <- result{n, err}
+		}()
+	}
+	wg.Wait()
+	close(res)
+	seen := map[string]bool{}
+	for r := range res {
+		if r.err != nil {
+			t.Errorf("revert: %v", r.err)
+			continue
+		}
+		if seen[r.name] {
+			t.Errorf("%s reverted twice", r.name)
+		}
+		seen[r.name] = true
+	}
+	if !seen["0003_c"] || !seen["0002_b"] {
+		t.Errorf("reverted %v, want 0003_c and 0002_b", seen)
+	}
+	if got := versions(t, pool); got != "1" {
+		t.Errorf("versions = %q, want 1", got)
+	}
+}
