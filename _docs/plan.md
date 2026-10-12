@@ -93,6 +93,14 @@ Adding a migration:
 - Write plain SQL valid inside a transaction (no `CREATE INDEX CONCURRENTLY`).
 - A database whose `schema_migrations` has a version this binary lacks refuses to start (`newer than this binary`).
 
+Reverting (down migrations):
+- A migration may have a down file next to it, `NNNN_description.down.sql` (same version and description as the up file). Add a down file next to each new migration; it is optional, but a migration without one cannot be reverted. `0001` has none and cannot be reverted. A down file without a matching up file, or `0001_*.down.sql`, fails loading.
+- Run `budgetcontrol migrate down` (reads only `DATABASE_URL`; it never starts the server). It reverts only the single latest applied migration: the down SQL and the deletion of its `schema_migrations` row run in one transaction under the same advisory lock as startup, and it prints `reverted <NNNN_name>`. Run it again to revert the next one. Several steps or a target version are not supported.
+- It refuses, changing nothing, when the latest migration has no down file (`no down migration for <NNNN_name>`), when only `0001` is applied (`0001_initial cannot be reverted`), or on any consistency failure (`modified after it was applied`, `newer than this binary`, a hole). With nothing applied it prints `nothing to revert` and does not create `schema_migrations` or adopt a legacy database.
+- Exit codes: 0 success (including `nothing to revert`), 1 failure (errors on stderr), 2 usage error (`budgetcontrol migrate` with a missing or unknown verb or extra arguments; `status` and `up` are not implemented yet, see #32).
+- The server never runs, reads or checksums down files, and the down file is not recorded, so it may be edited freely.
+- Warning: starting the server after `down` applies that migration again. Deploy the older binary before reverting, or the next start undoes the revert.
+
 ## Next Steps
 1. Set up Neon database and schema
 2. Build Go REST API with auth
