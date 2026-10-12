@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http/httptest"
 	"testing"
 )
@@ -38,7 +39,7 @@ func TestClientIP(t *testing.T) {
 			for _, l := range tc.xff {
 				r.Header.Add("X-Forwarded-For", l)
 			}
-			if got := clientIP(r, tc.trust, nil, 0); got != tc.want {
+			if got := clientIP(r, tc.trust, nil, 0, ""); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -90,7 +91,7 @@ func TestClientIPTrustedProxies(t *testing.T) {
 			for _, l := range tc.xff {
 				r.Header.Add("X-Forwarded-For", l)
 			}
-			if got := clientIP(r, tc.trust, list, 0); got != tc.want {
+			if got := clientIP(r, tc.trust, list, 0, ""); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -160,7 +161,7 @@ func TestClientIPHops(t *testing.T) {
 			for _, l := range tc.xff {
 				r.Header.Add("X-Forwarded-For", l)
 			}
-			if got := clientIP(r, tc.trust, nil, tc.hops); got != tc.want {
+			if got := clientIP(r, tc.trust, nil, tc.hops, ""); got != tc.want {
 				t.Errorf("got %q, want %q", got, tc.want)
 			}
 		})
@@ -172,7 +173,7 @@ func TestClientIPHopsRemoteNotChecked(t *testing.T) {
 	r := httptest.NewRequest("GET", "/", nil)
 	r.RemoteAddr = "203.0.113.9:1"
 	r.Header.Set("X-Forwarded-For", "1.1.1.1")
-	if got := clientIP(r, true, nil, 1); got != "1.1.1.1" {
+	if got := clientIP(r, true, nil, 1, ""); got != "1.1.1.1" {
 		t.Errorf("got %q, want 1.1.1.1", got)
 	}
 }
@@ -190,6 +191,101 @@ func TestParseTrustedProxyHops(t *testing.T) {
 	for _, v := range []string{"0", "-1", "abc", "1.5", "2 3", "+", "65", "1000", "99999999999999999999"} {
 		_, err := ParseTrustedProxyHops(v)
 		want := `invalid TRUSTED_PROXY_HOPS "` + v + `"`
+		if err == nil || err.Error() != want {
+			t.Errorf("%q: got %v, want %s", v, err, want)
+		}
+	}
+}
+
+func TestClientIPHeader(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		trust  bool
+		header string // configured name; "" means unset
+		list   string
+		remote string
+		real   []string // lines of the request header, set as X-Real-IP
+		xff    []string
+		want   string
+	}{
+		{"value used", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1"}, nil, "1.1.1.1"},
+		{"xff ignored entirely", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1"}, []string{"9.9.9.9"}, "1.1.1.1"},
+		{"spaces trimmed", true, "X-Real-IP", "", "10.0.0.1:1", []string{" 1.1.1.1 "}, nil, "1.1.1.1"},
+		{"missing no xff fallback", true, "X-Real-IP", "", "10.0.0.1:1", nil, []string{"9.9.9.9"}, "10.0.0.1"},
+		{"empty no xff fallback", true, "X-Real-IP", "", "10.0.0.1:1", []string{""}, []string{"9.9.9.9"}, "10.0.0.1"},
+		{"nonsense", true, "X-Real-IP", "", "10.0.0.1:1", []string{"nonsense"}, []string{"9.9.9.9"}, "10.0.0.1"},
+		{"port", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1:80"}, nil, "10.0.0.1"},
+		{"zone", true, "X-Real-IP", "", "10.0.0.1:1", []string{"fe80::1%eth0"}, nil, "10.0.0.1"},
+		{"list is not single", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1, 2.2.2.2"}, nil, "10.0.0.1"},
+		{"trailing comma", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1,"}, nil, "10.0.0.1"},
+		{"two lines ambiguous", true, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1", "2.2.2.2"}, nil, "10.0.0.1"},
+		{"ipv6 as is", true, "X-Real-IP", "", "10.0.0.1:1", []string{"2001:db8::1"}, nil, "2001:db8::1"},
+		{"ipv4-mapped unmapped", true, "X-Real-IP", "", "10.0.0.1:1", []string{"::ffff:1.2.3.4"}, nil, "1.2.3.4"},
+		{"list: listed remote", true, "X-Real-IP", "10.0.0.0/8", "10.0.0.1:1", []string{"1.1.1.1"}, nil, "1.1.1.1"},
+		{"list: unlisted remote", true, "X-Real-IP", "10.0.0.0/8", "203.0.113.9:1", []string{"1.1.1.1"}, nil, "203.0.113.9"},
+		{"list: invalid value", true, "X-Real-IP", "10.0.0.0/8", "10.0.0.1:1", []string{"nonsense"}, nil, "10.0.0.1"},
+		{"list: missing header", true, "X-Real-IP", "10.0.0.0/8", "10.0.0.1:1", nil, []string{"9.9.9.9"}, "10.0.0.1"},
+		{"list: mapped remote", true, "X-Real-IP", "10.0.0.0/8", "[::ffff:10.0.0.1]:1", []string{"1.1.1.1"}, nil, "1.1.1.1"},
+		{"list: mapped unlisted remote", true, "X-Real-IP", "10.0.0.0/8", "[::ffff:203.0.113.9]:1", []string{"1.1.1.1"}, nil, "203.0.113.9"},
+		{"no list: remote unchecked", true, "X-Real-IP", "", "203.0.113.9:1", []string{"1.1.1.1"}, nil, "1.1.1.1"},
+		{"trust off ignores header", false, "X-Real-IP", "", "10.0.0.1:1", []string{"1.1.1.1"}, nil, "10.0.0.1"},
+		{"header unset ignores X-Real-IP", true, "", "", "10.0.0.1:1", []string{"1.1.1.1"}, nil, "10.0.0.1"},
+		{"header unset still uses xff", true, "", "", "10.0.0.1:1", []string{"1.1.1.1"}, []string{"2.2.2.2"}, "2.2.2.2"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			list, err := ParseTrustedProxies(tc.list)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := httptest.NewRequest("GET", "/", nil)
+			r.RemoteAddr = tc.remote
+			for _, l := range tc.real {
+				r.Header.Add("X-Real-IP", l)
+			}
+			for _, l := range tc.xff {
+				r.Header.Add("X-Forwarded-For", l)
+			}
+			if got := clientIP(r, tc.trust, list, 0, tc.header); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClientIPHeaderNameCaseInsensitive(t *testing.T) {
+	t.Parallel()
+	// The request carries the header in any case; Header.Add canonicalizes
+	// it as the server does when reading a real request.
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:1"
+	r.Header.Add("cf-connecting-ip", "2.2.2.2")
+	h, err := ParseTrustedProxyHeader("cf-CONNECTING-ip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := clientIP(r, true, nil, 0, h); got != "2.2.2.2" {
+		t.Errorf("got %q, want 2.2.2.2", got)
+	}
+}
+
+func TestParseTrustedProxyHeader(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ value, want string }{
+		{"", ""}, {"   ", ""},
+		{"X-Real-IP", "X-Real-Ip"}, {"CF-Connecting-IP", "Cf-Connecting-Ip"},
+		{"True-Client-IP", "True-Client-Ip"}, {" x-real-ip ", "X-Real-Ip"},
+		{"x-forwarded-for", ""}, {"X-FORWARDED-FOR", ""}, {" X-Forwarded-For ", ""},
+	} {
+		if got, err := ParseTrustedProxyHeader(tc.value); err != nil || got != tc.want {
+			t.Errorf("%q: got %q, %v; want %q", tc.value, got, err, tc.want)
+		}
+	}
+	for _, v := range []string{"X Real IP", "X-Real-IP:", "X-Real IP", "X-R\u00e9al-IP", "a,b", "X-Real-IP, CF-Connecting-IP", "X\x00Y", "X\tY", "X\x7fY", "X\nY"} {
+		_, err := ParseTrustedProxyHeader(v)
+		want := fmt.Sprintf("invalid TRUSTED_PROXY_HEADER %q", v)
 		if err == nil || err.Error() != want {
 			t.Errorf("%q: got %v, want %s", v, err, want)
 		}

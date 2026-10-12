@@ -31,6 +31,11 @@ type Deps struct {
 	// X-Forwarded-For. 0 means unset; exclusive with TrustedProxies; only
 	// used when TrustedProxy is true.
 	TrustedProxyHops int
+	// TrustedProxyHeader (TRUSTED_PROXY_HEADER) names a single-IP header to
+	// read instead of X-Forwarded-For, in canonical form. "" means unset (or
+	// X-Forwarded-For); exclusive with TrustedProxyHops; only used when
+	// TrustedProxy is true. The proxy must overwrite it, not append.
+	TrustedProxyHeader string
 	// Now is the clock; nil means time.Now. Tests inject a fake.
 	Now func() time.Time
 }

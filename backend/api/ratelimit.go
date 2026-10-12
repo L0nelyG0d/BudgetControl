@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"sync"
@@ -120,7 +121,37 @@ func newLoginLimiter() *loginLimiter {
 // hops-th entry from the right, normalized. A chain shorter than hops or an
 // invalid entry at that position falls back to the remote address; other
 // entries are not inspected. The remote address is not checked.
-func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix, hops int) string {
+//
+// With trustProxy and a non-empty header (Deps.TrustedProxyHeader, never
+// X-Forwarded-For, exclusive with hops) that header is read instead: it must
+// appear on exactly one line and hold exactly one IP (no port, zone or list),
+// which is returned normalized. A missing, repeated or invalid header gives
+// the remote address; X-Forwarded-For is never used as a second chance. With
+// a proxies list the header is only read when the remote address is in the
+// list; otherwise the remote address is not checked.
+func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix, hops int, header string) string {
+	if trustProxy && header != "" {
+		host := remoteHost(r)
+		if len(proxies) > 0 {
+			remote, err := netip.ParseAddr(host)
+			if err != nil {
+				return host
+			}
+			host = remote.Unmap().String()
+			if !inProxies(remote.Unmap(), proxies) {
+				return host
+			}
+		}
+		values := r.Header.Values(header)
+		if len(values) != 1 {
+			return host
+		}
+		addr, err := netip.ParseAddr(strings.TrimSpace(values[0]))
+		if err != nil || addr.Zone() != "" {
+			return host
+		}
+		return addr.Unmap().String()
+	}
 	if trustProxy && hops > 0 && len(proxies) == 0 {
 		var chain []string
 		for _, line := range r.Header.Values("X-Forwarded-For") {
@@ -195,6 +226,30 @@ func ParseTrustedProxyHops(value string) (int, error) {
 		return 0, fmt.Errorf("invalid TRUSTED_PROXY_HOPS %q", value)
 	}
 	return n, nil
+}
+
+// ParseTrustedProxyHeader parses TRUSTED_PROXY_HEADER: one HTTP header name
+// (a non-empty token), spaces around it trimmed, returned in canonical form.
+// An empty value and X-Forwarded-For (any case) both give "" (the default).
+// Anything else returns an error naming the value.
+func ParseTrustedProxyHeader(value string) (string, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return "", nil
+	}
+	for i := 0; i < len(v); i++ {
+		c := v[i]
+		ok := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
+			strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
+		if !ok {
+			return "", fmt.Errorf("invalid TRUSTED_PROXY_HEADER %q", value)
+		}
+	}
+	v = textproto.CanonicalMIMEHeaderKey(v)
+	if v == "X-Forwarded-For" {
+		return "", nil
+	}
+	return v, nil
 }
 
 func inProxies(addr netip.Addr, proxies []netip.Prefix) bool {
