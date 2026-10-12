@@ -78,6 +78,7 @@ A fullstack web application for tracking personal expenses with category breakdo
 - Amounts must be positive integers of at most 1,000,000,000,000 (one trillion tenge), for expenses and budgets alike. The backend owns this limit; the frontend reads it once from `GET /config` and does not hard-code it. While that request is pending or if it fails, the frontend skips its own cap check and shows the backend's `400` message.
 - The frontend formats with `Intl.NumberFormat('ru-KZ', { style: 'currency', currency: 'KZT' })`.
 - Amount fields group digits by thousands with a regular space while typing (`1 500`); non-digits are left as typed so the validator rejects them on submit, and a hand-typed comma stays a comma. Defaults chosen by the orchestrator, not yet confirmed by the user (#34).
+- Pasting a value with one `₸`/`KZT`/`тг` marker (before or after, case-insensitive, optional space) into an amount field drops the marker and groups the number (`1 500 ₸` -> `1 500`). Only pasting does this; a marker typed by hand is left for the validator to reject. Defaults chosen by the PM, not yet confirmed by the user (#35).
 
 ## Database Tables (Planned)
 - `users` — id, email, password_hash, created_at
