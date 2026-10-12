@@ -156,15 +156,15 @@ export default function CategoriesPage() {
   const hasCustom = categories?.some((c) => !c.is_default) ?? false
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">Categories</h1>
+    <div className="flex flex-col gap-3">
+      <h1 className="text-xl font-semibold">Categories</h1>
 
       <Card>
         <CardHeader>
           <CardTitle>{editing ? 'Edit category' : 'Add category'}</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <form onSubmit={onSubmit} noValidate className="flex flex-col gap-3 sm:flex-row sm:items-start">
             <div className="flex flex-1 flex-col gap-2">
               <Label htmlFor="category-name">Name</Label>
               <Input
@@ -181,7 +181,7 @@ export default function CategoriesPage() {
                 </p>
               )}
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               <Label htmlFor="category-color">Color</Label>
               <input
                 id="category-color"
@@ -203,7 +203,7 @@ export default function CategoriesPage() {
             </div>
           </form>
           {formError && (
-            <p role="alert" className="mt-4 text-sm text-destructive">
+            <p role="alert" className="mt-3 text-sm text-destructive">
               {formError}
             </p>
           )}
@@ -212,7 +212,7 @@ export default function CategoriesPage() {
 
       {loadError ? (
         <Card>
-          <CardContent className="flex flex-col items-start gap-4">
+          <CardContent className="flex flex-col items-start gap-3">
             <p role="alert" className="text-sm text-destructive">
               Could not load categories. Check your connection and try again.
             </p>
@@ -222,14 +222,14 @@ export default function CategoriesPage() {
           </CardContent>
         </Card>
       ) : categories === null ? (
-        <div className="flex flex-col gap-2" role="status" aria-label="Loading categories">
+        <div className="flex flex-col gap-1.5" role="status" aria-label="Loading categories">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
         </div>
       ) : (
         <Card>
-          <CardContent className="flex flex-col gap-4">
+          <CardContent className="flex flex-col gap-3">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>

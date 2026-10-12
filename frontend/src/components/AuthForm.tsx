@@ -62,7 +62,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'register' }) {
       <form
         onSubmit={onSubmit}
         noValidate
-        className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6"
+        className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 shadow-xs"
       >
         <h1 className="text-2xl font-semibold">{isRegister ? 'Create account' : 'Log in'}</h1>
         <div className="flex flex-col gap-2">

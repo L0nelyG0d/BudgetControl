@@ -44,9 +44,9 @@ export default function BudgetsPage() {
       : undefined
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-2xl font-semibold">Budgets</h1>
+        <h1 className="text-xl font-semibold">Budgets</h1>
         <MonthPicker month={month} onChange={setMonth} />
       </div>
 
@@ -60,7 +60,7 @@ export default function BudgetsPage() {
 
       {state.status === 'error' && (
         <Card>
-          <CardContent className="flex flex-col items-start gap-4">
+          <CardContent className="flex flex-col items-start gap-3">
             <p role="alert">Could not load your budgets. Check your connection and try again.</p>
             <Button variant="outline" onClick={() => setAttempt((n) => n + 1)}>
               Try again

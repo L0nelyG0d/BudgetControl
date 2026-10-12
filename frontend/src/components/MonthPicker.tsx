@@ -8,20 +8,20 @@ export function MonthPicker({ month, onChange }: { month: string; onChange: (mon
       <Button
         type="button"
         variant="outline"
-        size="icon"
+        size="icon-sm"
         aria-label="Previous month"
         disabled={month <= MIN_MONTH}
         onClick={() => onChange(shiftMonth(month, -1))}
       >
         <ChevronLeft className="size-4" aria-hidden="true" />
       </Button>
-      <span className="min-w-36 text-center font-medium" aria-live="polite">
+      <span className="min-w-36 text-center text-sm font-semibold" aria-live="polite">
         {monthLabel(month)}
       </span>
       <Button
         type="button"
         variant="outline"
-        size="icon"
+        size="icon-sm"
         aria-label="Next month"
         disabled={month >= MAX_MONTH}
         onClick={() => onChange(shiftMonth(month, 1))}

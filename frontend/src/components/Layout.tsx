@@ -34,10 +34,10 @@ export function Layout() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card">
+      <header className="sticky top-0 z-10 border-b border-border bg-card/95 backdrop-blur">
         <nav
           aria-label="Main"
-          className="mx-auto flex max-w-4xl items-center gap-1 overflow-x-auto px-4 py-2"
+          className="mx-auto flex max-w-4xl items-center gap-1 overflow-x-auto px-4 py-1.5"
         >
           {links.map((l) => (
             <NavLink
@@ -45,7 +45,7 @@ export function Layout() {
               to={l.to}
               className={({ isActive }) =>
                 cn(
-                  'rounded-lg px-3 py-2 text-sm whitespace-nowrap focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
+                  'rounded-full px-3 py-1.5 text-sm whitespace-nowrap focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
                   isActive
                     ? 'bg-primary font-semibold text-primary-foreground'
                     : 'text-muted-foreground hover:text-foreground',
@@ -72,7 +72,7 @@ export function Layout() {
           </p>
         )}
       </header>
-      <main className="mx-auto max-w-4xl px-4 py-6">
+      <main className="mx-auto max-w-4xl px-4 py-3">
         <Outlet />
       </main>
     </div>

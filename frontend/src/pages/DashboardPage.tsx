@@ -81,12 +81,12 @@ export default function DashboardPage() {
   const load = () => setAttempt((n) => n + 1)
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Dashboard</h1>
+    <div className="space-y-3">
+      <h1 className="text-xl font-semibold">Dashboard</h1>
       <MonthPicker month={month} onChange={setMonth} />
 
       {state.status === 'loading' && (
-        <div className="space-y-4" role="status" aria-label="Loading dashboard">
+        <div className="space-y-3" role="status" aria-label="Loading dashboard">
           <Skeleton className="h-8 w-40" />
           <Skeleton className="h-64 w-full" />
           <Skeleton className="h-40 w-full" />
@@ -95,7 +95,7 @@ export default function DashboardPage() {
 
       {state.status === 'error' && (
         <Card>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-3">
             <p role="alert" className="text-destructive">
               Could not load the dashboard: {state.message}. Check your connection and try again.
             </p>
@@ -131,7 +131,7 @@ function Ready({ summary }: { summary: Summary }) {
           {spending.length === 0 ? (
             <p className="text-muted-foreground">No expenses this month</p>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               <ChartContainer config={config} className="mx-auto max-h-64">
                 <PieChart>
                   <ChartTooltip content={<ChartTooltipContent nameKey="name" />} />

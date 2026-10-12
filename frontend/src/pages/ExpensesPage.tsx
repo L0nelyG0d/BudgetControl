@@ -118,8 +118,8 @@ export default function ExpensesPage() {
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-6 px-4 py-6">
-      <h1 className="text-2xl font-semibold">Expenses</h1>
+    <div className="flex flex-col gap-3">
+      <h1 className="text-xl font-semibold">Expenses</h1>
 
       {state.status === 'loading' && (
         <div role="status" aria-label="Loading expenses" className="flex flex-col gap-2">
@@ -215,7 +215,7 @@ function ExpenseTable({
 }) {
   if (data.expenses.length === 0) {
     return (
-      <div className="rounded-xl border border-border bg-card p-6 text-center">
+      <div className="rounded-xl border border-border bg-card p-4 text-center">
         <p className="font-semibold">No expenses yet</p>
         <p className="text-sm text-muted-foreground">Add your first expense with the form above.</p>
       </div>

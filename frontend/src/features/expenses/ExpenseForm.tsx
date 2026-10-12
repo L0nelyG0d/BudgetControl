@@ -93,11 +93,11 @@ export function ExpenseForm({
     <form
       onSubmit={onSubmit}
       noValidate
-      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-4"
+      className="flex flex-col gap-3 rounded-xl border border-border bg-card p-3 shadow-xs"
     >
       <h2 className="text-base font-semibold">{editing ? 'Edit expense' : 'Add expense'}</h2>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="flex flex-col gap-2">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="expense-amount">Amount, ₸</Label>
           <Input
             id="expense-amount"
@@ -114,7 +114,7 @@ export function ExpenseForm({
             </p>
           )}
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="expense-category">Category</Label>
           <Select value={categoryId} onValueChange={setCategoryId}>
             <SelectTrigger id="expense-category" className="w-full">
@@ -129,7 +129,7 @@ export function ExpenseForm({
             </SelectContent>
           </Select>
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="expense-date">Date</Label>
           <Input
             id="expense-date"
@@ -138,7 +138,7 @@ export function ExpenseForm({
             onChange={(e) => setDate(e.target.value)}
           />
         </div>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-1.5">
           <Label htmlFor="expense-note">Note (optional)</Label>
           <Input
             id="expense-note"
