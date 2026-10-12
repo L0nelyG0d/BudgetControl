@@ -109,8 +109,8 @@ Goal: Users can type `1 500` or `1,500` and it is accepted.
 Description: Follow-up to #23. One shared function in `amount.ts` (used by `validateAmount` and `parseAmount`, so both forms) accepts strictly grouped thousands: a first group of 1-3 digits not starting with `0`, then groups of exactly 3, joined by a space, NBSP (U+00A0), narrow NBSP (U+202F) or comma; plain digits work as before. `1 500` and `1,500` are sent as `1500`; `1,00`, `1,5`, `1500,5`, `1500.5`, `1.500`, `0,500`, `12 34`, `1,,000`, trailing/leading separators and `1 500 ₸` are rejected with the whole-number message. Surrounding whitespace from pasting is trimmed. Cap, empty, zero and negative rules apply to the cleaned value. Strict grouping is deliberate so a ru-KZ decimal comma is never read as thousands. Confirmed with the user: strict grouping, space and comma separators, mixed separators allowed, pasted `₸`/`KZT`/`тг` rejected. Out of scope: live grouping while typing (#34), pasted currency marker (#35), tiyn (plan).
 
 ## 28. Expose the amount limit from the backend to the frontend
-Goal: The frontend does not hard-code the amount limit.
-Description: Follow-up to #23. The API exposes the limit and the forms use it, falling back to the backend 400 message. Design to be agreed with the user first.
+Goal: The backend owns the amount limit and the frontend reads it instead of hard-coding it.
+Description: Follow-up to #23. New public `GET /config` (no session, no database, 405 for other methods) returns `{"maxAmount": 1000000000000}` from the same `maxAmount` constant the expense and budget validation use. The frontend requests `/api/config` once per page load (in memory, shared by the expense form and all budget rows) and removes `MAX_AMOUNT` from `amount.ts`. While loading, and if the load fails (network error, non-2xx, malformed body), the forms are not blocked and do not check the cap client-side, so the backend 400 message is shown as is. Once loaded the cap message uses the loaded value; other amount rules (#23, #27) are unchanged. Go and frontend tests on both sides (including a test that the endpoint value equals the enforced limit) and `GET /config` documented in `_docs/plan.md`. Out of scope: changing the limit (#19), retrying a failed load (#36), other limits (#37). Decided with the user: new endpoint, loaded once, fall back to the backend 400. To confirm: forms are not blocked while loading.
 
 ## 29. Backend: support other proxy headers for the client IP
 Goal: Let operators use `X-Real-IP`, `Forwarded` or similar instead of `X-Forwarded-For`.
@@ -139,3 +139,11 @@ Description: Follow-up to #27. Design (grouping character, cursor and paste beha
 ## 35. Frontend: accept a currency marker when pasting an amount
 Goal: A value pasted from the app's own display, such as `1 500 ₸`, is accepted in amount fields.
 Description: Follow-up to #27, which rejects `₸`, `KZT` and `тг`. Must define which markers are stripped and where. Only if the user wants it.
+
+## 36. Frontend: retry loading the amount limit after a failure
+Goal: A failed `GET /config` load is retried later instead of staying unknown until reload.
+Description: Follow-up to #28. Design (retry on next form open, timed, or manual) to be agreed with the user first.
+
+## 37. Backend: expose other validation limits through GET /config
+Goal: Other limits the frontend duplicates (e.g. minimum password length) are read from `GET /config`.
+Description: Follow-up to #28. Which limits to expose to be agreed with the user first; only if the user wants it.

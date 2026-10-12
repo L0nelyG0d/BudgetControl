@@ -51,6 +51,7 @@ A fullstack web application for tracking personal expenses with category breakdo
 ### Backend (Go)
 - JWT authentication middleware
 - REST endpoints:
+  - `GET /config` — public (no session, no database); returns `{"maxAmount": 1000000000000}`, the amount limit, read from the same constant the validation uses
   - `POST /auth/register`
   - `POST /auth/login` — sets the `session` cookie
   - `POST /auth/logout` — clears the cookie
@@ -73,7 +74,7 @@ A fullstack web application for tracking personal expenses with category breakdo
 ## Money
 - Single currency: Kazakhstani tenge (₸, KZT). No currency column, no multi-currency.
 - Amounts are stored and sent over the API as whole tenge in a `BIGINT` (`1500` = 1,500 ₸). No fractional amounts (tiyn).
-- Amounts must be positive integers of at most 1,000,000,000,000 (one trillion tenge), for expenses and budgets alike.
+- Amounts must be positive integers of at most 1,000,000,000,000 (one trillion tenge), for expenses and budgets alike. The backend owns this limit; the frontend reads it once from `GET /config` and does not hard-code it. While that request is pending or if it fails, the frontend skips its own cap check and shows the backend's `400` message.
 - The frontend formats with `Intl.NumberFormat('ru-KZ', { style: 'currency', currency: 'KZT' })`.
 
 ## Database Tables (Planned)

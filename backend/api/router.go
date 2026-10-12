@@ -45,6 +45,7 @@ func NewRouter(deps Deps) *http.ServeMux {
 	h := &Handler{deps: deps, loginLimit: newLoginLimiter()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", h.health)
+	h.registerConfigRoutes(mux)
 	h.registerAuthRoutes(mux)
 	h.registerCategoryRoutes(mux)
 	h.registerExpenseRoutes(mux)
