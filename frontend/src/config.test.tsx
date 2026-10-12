@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ExpensesPage from '@/pages/ExpensesPage'
 import BudgetsPage from '@/pages/BudgetsPage'
@@ -159,5 +159,132 @@ describe('amount limit from GET /config', () => {
     expect(screen.getByLabelText('Overall budget in tenge')).toBeInTheDocument()
     await new Promise((r) => setTimeout(r, 0))
     expect(configCalls(fn)).toHaveLength(1)
+  })
+
+  describe('retry after a failed load (#36)', () => {
+    const failures: [string, ConfigReply][] = [
+      ['network error', () => Promise.reject(new TypeError('Failed to fetch'))],
+      ['500', () => json(500, { error: 'boom' })],
+      ['malformed body', () => json(200, { maxAmount: 'lots' })],
+    ]
+    const tick = () => new Promise((r) => setTimeout(r, 0))
+
+    // First /api/config call gets `first`, later ones get `later`.
+    function mockSequence(first: ConfigReply, later: ConfigReply) {
+      let n = 0
+      return mockApi(() => (n++ === 0 ? first() : later()))
+    }
+
+    it.each(failures)('%s: the next form open retries once and the limit is enforced', async (_, fail) => {
+      const fn = mockSequence(fail, () => json(200, { maxAmount: 5000 }))
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      expect(configCalls(fn)).toHaveLength(1)
+      cleanup()
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await waitFor(() => expect(configCalls(fn)).toHaveLength(2))
+      await tick()
+      await addExpense('5001')
+      expect(await screen.findByText(matcher(`Amount must be at most ${formatMoney(5000)}.`))).toBeInTheDocument()
+      expect(writes(fn)).toHaveLength(0)
+      await addExpense('5000')
+      await waitFor(() => expect(writes(fn)).toHaveLength(1))
+    })
+
+    it('a failed retry leaves the limit unknown, shows the backend 400 and sends nothing more', async () => {
+      const fn = mockApi(() => Promise.reject(new TypeError('Failed to fetch')))
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      cleanup()
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await waitFor(() => expect(configCalls(fn)).toHaveLength(2))
+      await tick()
+      await addExpense('1000000000001')
+      expect(await screen.findByText(backend400)).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Add expense' })).toBeEnabled()
+      await tick()
+      expect(configCalls(fn)).toHaveLength(2)
+      // Each later open retries again.
+      cleanup()
+      render(<ExpensesPage />)
+      await waitFor(() => expect(configCalls(fn)).toHaveLength(3))
+    })
+
+    it('forms mounting together send one request, also while one is in flight', async () => {
+      const fn = mockApi(() => Promise.reject(new TypeError('Failed to fetch')))
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      cleanup()
+      const fn2 = mockApi(() => new Promise<Response>(() => {}))
+      render(<BudgetsPage />)
+      await screen.findByLabelText('Food budget in tenge')
+      render(<ExpensesPage />)
+      await tick()
+      expect(configCalls(fn)).toHaveLength(1)
+      expect(configCalls(fn2)).toHaveLength(1)
+    })
+
+    it('typing and validation errors never start a request', async () => {
+      const fn = mockApi(() => Promise.reject(new TypeError('Failed to fetch')))
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      await addExpense('abc')
+      await screen.findByText(/whole number/)
+      await addExpense('')
+      await addExpense('1000000000001')
+      await screen.findByText(backend400)
+      await tick()
+      expect(configCalls(fn)).toHaveLength(1)
+    })
+
+    it('no request after a successful load, however many forms open', async () => {
+      const fn = mockSequence(
+        () => Promise.reject(new TypeError('Failed to fetch')),
+        () => json(200, { maxAmount: 5000 }),
+      )
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      cleanup()
+      render(<ExpensesPage />)
+      await waitFor(() => expect(configCalls(fn)).toHaveLength(2))
+      await tick()
+      cleanup()
+      render(<BudgetsPage />)
+      await screen.findByLabelText('Food budget in tenge')
+      cleanup()
+      render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      expect(configCalls(fn)).toHaveLength(2)
+      expect(localStorage.length).toBe(0)
+    })
+
+    it('an already open form picks up the limit when the retry succeeds', async () => {
+      let release: (r: Response) => void = () => {}
+      const fn = mockSequence(
+        () => Promise.reject(new TypeError('Failed to fetch')),
+        () => new Promise<Response>((r) => (release = r)),
+      )
+      const first = render(<ExpensesPage />)
+      await screen.findByText('No expenses yet')
+      await tick()
+      const open = within(first.container)
+      // A second form opens (the retry) while the first stays open.
+      render(<BudgetsPage />)
+      await waitFor(() => expect(configCalls(fn)).toHaveLength(2))
+      release(new Response(JSON.stringify({ maxAmount: 5000 }), { status: 200 }))
+      await tick()
+      fireEvent.change(await open.findByLabelText(/^Amount/), { target: { value: '5001' } })
+      fireEvent.click(open.getByRole('button', { name: 'Add expense' }))
+      expect(await open.findByText(matcher(`Amount must be at most ${formatMoney(5000)}.`))).toBeInTheDocument()
+      expect(writes(fn)).toHaveLength(0)
+    })
   })
 })
