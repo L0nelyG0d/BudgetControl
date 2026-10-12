@@ -26,6 +26,11 @@ type Deps struct {
 	// TrustedProxies (TRUSTED_PROXIES) lists the proxy IPs/CIDRs whose
 	// X-Forwarded-For is believed; only used when TrustedProxy is true.
 	TrustedProxies []netip.Prefix
+	// TrustedProxyHops (TRUSTED_PROXY_HOPS) is the number of proxies in front
+	// of the server: the client IP is that many entries from the right of
+	// X-Forwarded-For. 0 means unset; exclusive with TrustedProxies; only
+	// used when TrustedProxy is true.
+	TrustedProxyHops int
 	// Now is the clock; nil means time.Now. Tests inject a fake.
 	Now func() time.Time
 }

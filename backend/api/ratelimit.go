@@ -114,7 +114,25 @@ func newLoginLimiter() *loginLimiter {
 // are joined into one chain and walked from the right, skipping listed
 // proxies; the first unlisted entry is the client. A malformed entry, an
 // empty chain or an all-trusted chain falls back to the remote address.
-func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix) string {
+//
+// With trustProxy and hops > 0 (Deps.TrustedProxyHops, mutually exclusive with
+// the proxies list) the lines are joined into one chain and the client is the
+// hops-th entry from the right, normalized. A chain shorter than hops or an
+// invalid entry at that position falls back to the remote address; other
+// entries are not inspected. The remote address is not checked.
+func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix, hops int) string {
+	if trustProxy && hops > 0 && len(proxies) == 0 {
+		var chain []string
+		for _, line := range r.Header.Values("X-Forwarded-For") {
+			chain = append(chain, strings.Split(line, ",")...)
+		}
+		if len(chain) >= hops {
+			if addr, err := netip.ParseAddr(strings.TrimSpace(chain[len(chain)-hops])); err == nil && addr.Zone() == "" {
+				return addr.Unmap().String()
+			}
+		}
+		return remoteHost(r)
+	}
 	if trustProxy && len(proxies) == 0 {
 		if lines := r.Header.Values("X-Forwarded-For"); len(lines) > 0 {
 			last := lines[len(lines)-1]
@@ -124,10 +142,7 @@ func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix) string {
 			}
 		}
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
+	host := remoteHost(r)
 	if !trustProxy || len(proxies) == 0 {
 		return host
 	}
@@ -154,6 +169,32 @@ func clientIP(r *http.Request, trustProxy bool, proxies []netip.Prefix) string {
 		}
 	}
 	return remote.String()
+}
+
+func remoteHost(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// MaxTrustedProxyHops is the largest accepted TRUSTED_PROXY_HOPS.
+const MaxTrustedProxyHops = 64
+
+// ParseTrustedProxyHops parses TRUSTED_PROXY_HOPS: an integer from 1 to
+// MaxTrustedProxyHops, spaces around it allowed. An empty value gives 0
+// (unset). Anything else returns an error naming the value.
+func ParseTrustedProxyHops(value string) (int, error) {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 || n > MaxTrustedProxyHops {
+		return 0, fmt.Errorf("invalid TRUSTED_PROXY_HOPS %q", value)
+	}
+	return n, nil
 }
 
 func inProxies(addr netip.Addr, proxies []netip.Prefix) bool {

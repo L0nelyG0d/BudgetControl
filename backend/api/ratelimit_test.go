@@ -393,3 +393,31 @@ func TestLoginRateLimitTrustedProxyFallback(t *testing.T) {
 		t.Fatalf("got %d, want 429", rec.Code)
 	}
 }
+
+func TestLoginRateLimitTrustedProxyHops(t *testing.T) {
+	pool := testutil.Pool(t)
+	deps := testutil.Deps(pool)
+	deps.TrustedProxy = true
+	deps.TrustedProxyHops = 1
+	h := api.NewRouter(deps)
+	good := testutil.UniqueEmail("hopsok")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	// Two clients behind one proxy; the forged left entry is ignored.
+	a, b := "9.9.9.9, 198.51.100.1", "9.9.9.9, 198.51.100.2"
+	for i := 0; i < ipLimit; i++ {
+		if rec := loginViaProxy(h, a, testutil.UniqueEmail("h"), "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := loginViaProxy(h, a, testutil.UniqueEmail("h"), "wrong"); rec.Code != 429 {
+		t.Fatalf("21st from A: got %d, want 429", rec.Code)
+	}
+	if rec := loginViaProxy(h, b, testutil.UniqueEmail("h"), "wrong"); rec.Code != 401 {
+		t.Errorf("B wrong password: got %d, want 401", rec.Code)
+	}
+	if rec := loginViaProxy(h, b, good, "password123"); rec.Code != 200 {
+		t.Errorf("B right password: got %d, want 200", rec.Code)
+	}
+}
