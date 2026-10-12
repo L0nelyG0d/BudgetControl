@@ -421,3 +421,41 @@ func TestLoginRateLimitTrustedProxyHops(t *testing.T) {
 		t.Errorf("B right password: got %d, want 200", rec.Code)
 	}
 }
+
+func TestLoginRateLimitTrustedProxyHeader(t *testing.T) {
+	pool := testutil.Pool(t)
+	deps := testutil.Deps(pool)
+	deps.TrustedProxy = true
+	deps.TrustedProxyHeader = "X-Real-Ip"
+	h := api.NewRouter(deps)
+	good := testutil.UniqueEmail("realipok")
+	testutil.CleanupUser(t, pool, good)
+	registerUser(t, h, nil, good, "password123")
+
+	login := func(realIP, email, pw string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest("POST", "/auth/login",
+			strings.NewReader(`{"email":"`+email+`","password":"`+pw+`"}`))
+		req.RemoteAddr = "10.0.0.1:4321" // always the proxy
+		req.Header.Set("X-Real-IP", realIP)
+		req.Header.Set("X-Forwarded-For", "9.9.9.9") // ignored
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	// Two clients behind one proxy, told apart by X-Real-IP.
+	a, b := "198.51.100.1", "198.51.100.2"
+	for i := 0; i < ipLimit; i++ {
+		if rec := login(a, testutil.UniqueEmail("r"), "wrong"); rec.Code != 401 {
+			t.Fatalf("attempt %d: got %d, want 401", i+1, rec.Code)
+		}
+	}
+	if rec := login(a, testutil.UniqueEmail("r"), "wrong"); rec.Code != 429 {
+		t.Fatalf("21st from A: got %d, want 429", rec.Code)
+	}
+	if rec := login(b, testutil.UniqueEmail("r"), "wrong"); rec.Code != 401 {
+		t.Errorf("B wrong password: got %d, want 401", rec.Code)
+	}
+	if rec := login(b, good, "password123"); rec.Code != 200 {
+		t.Errorf("B right password: got %d, want 200", rec.Code)
+	}
+}
