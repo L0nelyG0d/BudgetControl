@@ -150,7 +150,7 @@ Description: Follow-up to #28. Which limits to expose to be agreed with the user
 
 ## 38. Backend: combine trusted proxy hop count with the address list
 Goal: An operator can use `TRUSTED_PROXY_HOPS` and `TRUSTED_PROXIES` together.
-Description: Follow-up to #30, where setting both is a startup error. Design to be agreed with the user first; standard library only.
+Description: Follow-up to #30, where setting both is a startup error. With `TRUSTED_PROXY=true` and both `TRUSTED_PROXY_HOPS` and `TRUSTED_PROXIES` set, the remote address must be in the list; if so the client IP is the Nth entry from the right of the joined `X-Forwarded-For` chain (listed entries in the chain are not skipped); a short chain or malformed Nth entry falls back to the remote address, and a remote address not in the list is used as is. Setting both no longer fails startup (invalid values still do); `TRUSTED_PROXY_HEADER` with `TRUSTED_PROXY_HOPS` keeps failing as in #29. Go table tests for `clientIP` and `proxyConfig`, and `_docs/plan.md` documents it. Out of scope: logging fallbacks (#39), combining with `TRUSTED_PROXY_HEADER`. Decisions made while grooming, see the issue Constraints.
 
 ## 39. Backend: log client IP fallbacks behind a trusted proxy
 Goal: An operator can see when the proxy setup does not match the configured hop count.
