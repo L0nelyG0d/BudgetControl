@@ -205,6 +205,17 @@ func TestRunMigrate(t *testing.T) {
 		{name: "up legacy and more", args: []string{"up"}, getenv: withURL, upRes: db.ApplyResult{Adopted: true, Applied: []string{"0002_b"}},
 			wantOut: "adopted 0001_initial\napplied 0002_b\n", wantCalled: "up"},
 		{name: "up failure prints nothing on stdout", args: []string{"up"}, getenv: withURL, upErr: errors.New("migration 0002_b.sql: boom"), wantCode: 1, wantErr: "0002_b.sql", wantCalled: "up"},
+		{name: "up partial failure prints committed migrations", args: []string{"up"}, getenv: withURL,
+			upRes: db.ApplyResult{Applied: []string{"0002_b"}}, upErr: errors.New("migration 0003_c.sql: boom"),
+			wantCode: 1, wantOut: "applied 0002_b\n", wantErr: "migrate up: migration 0003_c.sql: boom", wantCalled: "up"},
+		{name: "up partial failure after adoption", args: []string{"up"}, getenv: withURL,
+			upRes: db.ApplyResult{Adopted: true}, upErr: errors.New("migration 0002_b.sql did not finish"),
+			wantCode: 1, wantOut: "adopted 0001_initial\n", wantErr: "did not finish", wantCalled: "up"},
+		{name: "status interrupted", args: []string{"status"}, getenv: withURL,
+			statusRep: db.StatusReport{Lines: []db.StatusLine{line(1, "initial", "applied", "ok"), line(2, "idx", "pending", "interrupted")}, Applied: 1, Pending: 1,
+				Problems: []error{errors.New("migration 0002_idx.sql did not finish (up)")}},
+			wantCode: 1, wantOut: "0001\tinitial\tapplied\tok\n0002\tidx\tpending\tinterrupted\n1 applied, 1 pending\n",
+			wantErr: "did not finish", wantCalled: "status"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

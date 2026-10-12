@@ -106,15 +106,17 @@ func runMigrate(ctx context.Context, args []string, stdout, stderr io.Writer, ge
 		}
 	case "up":
 		res, err := ops.up(ctx, dbURL)
-		if err != nil {
-			fmt.Fprintf(stderr, "migrate up: %v\n", err)
-			return 1
-		}
+		// After a failure res lists only the migrations that were committed
+		// before it (non-transactional migrations commit separately).
 		if res.Adopted {
 			fmt.Fprintln(stdout, "adopted 0001_initial")
 		}
 		for _, name := range res.Applied {
 			fmt.Fprintf(stdout, "applied %s\n", name)
+		}
+		if err != nil {
+			fmt.Fprintf(stderr, "migrate up: %v\n", err)
+			return 1
 		}
 		if !res.Adopted && len(res.Applied) == 0 {
 			fmt.Fprintln(stdout, "nothing to apply")

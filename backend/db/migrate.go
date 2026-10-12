@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,6 +36,17 @@ type migration struct {
 	sql      string
 	checksum string // hex SHA-256 of the exact file bytes
 	downFile string // name of the matching NNNN_description.down.sql, "" if none
+	noTx     bool   // first line is noTransactionMarker: run outside a transaction
+}
+
+// noTransactionMarker, as the exact first line of a migration file (up or
+// down), makes it run outside a transaction.
+const noTransactionMarker = "-- migrate:no-transaction"
+
+// isNoTransaction reports whether body starts with the marker line (LF or CRLF).
+func isNoTransaction(body string) bool {
+	line, _, _ := strings.Cut(body, "\n")
+	return strings.TrimSuffix(line, "\r") == noTransactionMarker
 }
 
 // ApplySchema applies the embedded migrations that the database has not seen
@@ -78,8 +90,12 @@ func loadMigrations(fsys fs.FS) ([]migration, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read migration %s: %w", e.Name(), err)
 		}
+		noTx := isNoTransaction(string(body))
+		if noTx && v == 1 {
+			return nil, fmt.Errorf("migration file %q: the baseline cannot be non-transactional", e.Name())
+		}
 		sum := sha256.Sum256(body)
-		out = append(out, migration{version: v, name: e.Name(), sql: string(body), checksum: hex.EncodeToString(sum[:])})
+		out = append(out, migration{version: v, name: e.Name(), sql: string(body), checksum: hex.EncodeToString(sum[:]), noTx: noTx})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].version < out[j].version })
 	for i, m := range out {
@@ -128,21 +144,32 @@ func ApplyEmbedded(ctx context.Context, pool *pgxpool.Pool) (ApplyResult, error)
 	return ApplyMigrationsReport(ctx, pool, sub)
 }
 
-// ApplyMigrationsReport is ApplyMigrations that also reports what it did. The
-// result is only meaningful (and non-zero) after a successful commit.
+// ApplyMigrationsReport is ApplyMigrations that also reports what it did.
+// Consecutive transactional migrations run in one transaction; a migration with
+// the no-transaction marker commits the open group first and runs on its own
+// (see runOutsideTx). On failure the result lists the migrations that were
+// committed before it, together with the error.
 func ApplyMigrationsReport(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (ApplyResult, error) {
 	var res ApplyResult
 	migs, err := loadMigrations(fsys)
 	if err != nil {
-		return ApplyResult{}, err
+		return res, err
 	}
-	tx, err := pool.Begin(ctx)
+	conn, err := pool.Acquire(ctx)
 	if err != nil {
-		return ApplyResult{}, err
+		return res, err
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockID); err != nil {
-		return ApplyResult{}, err
+	defer conn.Release()
+	var tx pgx.Tx
+	sl := &sessionLock{conn: conn}
+	defer func() {
+		if tx != nil {
+			tx.Rollback(context.Background())
+		}
+		sl.release()
+	}()
+	if err := lockSchema(ctx, conn, sl, hasNonTransactional(migs), &tx); err != nil {
+		return res, err
 	}
 
 	// Decide on adoption before the table exists: a database built from the
@@ -151,7 +178,7 @@ func ApplyMigrationsReport(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) 
 	if err := tx.QueryRow(ctx,
 		`SELECT to_regclass('schema_migrations') IS NOT NULL, to_regclass('users') IS NOT NULL`,
 	).Scan(&hasTracking, &hasUsers); err != nil {
-		return ApplyResult{}, err
+		return res, err
 	}
 	if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
     version    BIGINT PRIMARY KEY,
@@ -159,41 +186,296 @@ func ApplyMigrationsReport(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) 
     checksum   TEXT        NOT NULL,
     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )`); err != nil {
-		return ApplyResult{}, err
+		return res, err
 	}
 	applied := map[int64]string{} // version -> recorded checksum
+	adopting := false
 	if !hasTracking && hasUsers && len(migs) > 0 {
 		if err := record(ctx, tx, migs[0]); err != nil {
-			return ApplyResult{}, err
+			return res, err
 		}
 		applied[migs[0].version] = migs[0].checksum
-		res.Adopted = true
+		adopting = true
 	} else {
 		var err error
 		if applied, err = readApplied(ctx, tx); err != nil {
-			return ApplyResult{}, err
+			return res, err
 		}
 	}
 
-	if err := checkApplied(migs, applied); err != nil {
-		return ApplyResult{}, err
+	if err := checkNotInterrupted(ctx, tx); err != nil {
+		return res, err
 	}
+	if err := checkApplied(migs, applied); err != nil {
+		return res, err
+	}
+	var pending []migration
 	for _, m := range migs {
-		if _, done := applied[m.version]; done {
+		if _, done := applied[m.version]; !done {
+			pending = append(pending, m)
+		}
+	}
+
+	var group []string
+	commit := func() error {
+		err := tx.Commit(ctx)
+		tx = nil
+		if err != nil {
+			return err
+		}
+		res.Adopted = res.Adopted || adopting
+		res.Applied = append(res.Applied, group...)
+		group = nil
+		return nil
+	}
+	for _, m := range pending {
+		base := strings.TrimSuffix(m.name, ".sql")
+		if m.noTx {
+			if tx != nil {
+				if err := commit(); err != nil {
+					return res, err
+				}
+			}
+			err := runOutsideTx(ctx, conn, m.version, m.name, "up", m.sql, func(tx pgx.Tx) error {
+				return record(ctx, tx, m)
+			})
+			if err != nil {
+				return res, err
+			}
+			res.Applied = append(res.Applied, base)
 			continue
 		}
+		if tx == nil {
+			if tx, err = conn.Begin(ctx); err != nil {
+				return res, err
+			}
+		}
 		if _, err := tx.Exec(ctx, m.sql); err != nil {
-			return ApplyResult{}, fmt.Errorf("migration %s: %w", m.name, err)
+			return res, fmt.Errorf("migration %s: %w", m.name, err)
 		}
 		if err := record(ctx, tx, m); err != nil {
-			return ApplyResult{}, fmt.Errorf("migration %s: %w", m.name, err)
+			return res, fmt.Errorf("migration %s: %w", m.name, err)
 		}
-		res.Applied = append(res.Applied, strings.TrimSuffix(m.name, ".sql"))
+		group = append(group, base)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return ApplyResult{}, err
+	if tx != nil {
+		if err := commit(); err != nil {
+			return res, err
+		}
 	}
 	return res, nil
+}
+
+// hasNonTransactional reports whether any up file of the set opts out.
+func hasNonTransactional(migs []migration) bool {
+	for _, m := range migs {
+		if m.noTx {
+			return true
+		}
+	}
+	return false
+}
+
+// downIsNonTransactional reports whether any down file of the set opts out.
+// Only `migrate down` asks; the files are read just for their first line.
+func downIsNonTransactional(fsys fs.FS, migs []migration) bool {
+	for _, m := range migs {
+		if m.downFile == "" {
+			continue
+		}
+		if body, err := fs.ReadFile(fsys, m.downFile); err == nil && isNoTransaction(string(body)) {
+			return true
+		}
+	}
+	return false
+}
+
+// lockSchema takes the schema advisory lock and starts the first transaction
+// in *tx. When the run may use non-transactional statements (session), the
+// lock is a session-level lock taken before any transaction begins, because
+// transaction-level locks do not span the commits of the run. Otherwise it is
+// a transaction-level lock. Either way a waiting caller polls (see pollLock)
+// and holds no open transaction while it waits.
+func lockSchema(ctx context.Context, conn *pgxpool.Conn, sl *sessionLock, session bool, tx *pgx.Tx) error {
+	if session {
+		if err := sl.acquire(ctx); err != nil {
+			return err
+		}
+		t, err := conn.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		*tx = t
+		return nil
+	}
+	return pollLock(ctx, func() (bool, error) {
+		t, err := conn.Begin(ctx)
+		if err != nil {
+			return false, err
+		}
+		var got bool
+		if err := t.QueryRow(ctx, "SELECT pg_try_advisory_xact_lock($1)", schemaLockID).Scan(&got); err != nil || !got {
+			t.Rollback(context.Background())
+			return false, err
+		}
+		*tx = t
+		return true, nil
+	})
+}
+
+// sessionLock holds the schema advisory lock at session level on one
+// connection, so it spans the separate transactions of a run.
+type sessionLock struct {
+	conn *pgxpool.Conn
+	held bool
+}
+
+// acquire takes the session-level lock, see pollLock.
+func (l *sessionLock) acquire(ctx context.Context) error {
+	err := pollLock(ctx, func() (bool, error) {
+		var got bool
+		err := l.conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", schemaLockID).Scan(&got)
+		return got, err
+	})
+	if err != nil {
+		return err
+	}
+	l.held = true
+	return nil
+}
+
+// pollLock calls try until it reports success. Waiting is done here and not
+// inside the server (pg_advisory_lock, or a transaction waiting for its
+// lock): that would hold a snapshot, and a running CREATE INDEX CONCURRENTLY
+// waits for every older snapshot in the database to go away, which would
+// deadlock against the waiting caller.
+func pollLock(ctx context.Context, try func() (bool, error)) error {
+	for {
+		got, err := try()
+		if err != nil || got {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(lockPollInterval):
+		}
+	}
+}
+
+const lockPollInterval = 20 * time.Millisecond
+
+// release unlocks; if that fails the connection is closed, which also
+// releases the lock.
+func (l *sessionLock) release() {
+	if !l.held {
+		return
+	}
+	l.held = false
+	if _, err := l.conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", schemaLockID); err != nil {
+		l.conn.Hijack().Close(context.Background())
+	}
+}
+
+// runOutsideTx runs one non-transactional statement (file is the migration
+// file name, direction "up" or "down"). It records an in-progress row in its
+// own transaction, runs sql with no transaction, then calls finish in a new
+// transaction that also deletes the in-progress row. Any failure leaves the
+// row, so later runs refuse to continue (checkNotInterrupted).
+func runOutsideTx(ctx context.Context, conn *pgxpool.Conn, version int64, file, direction, sql string, finish func(tx pgx.Tx) error) error {
+	inTx := func(f func(tx pgx.Tx) error) error {
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(context.Background())
+		if err := f(tx); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	err := inTx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations_in_progress (
+    version    BIGINT PRIMARY KEY,
+    name       TEXT        NOT NULL,
+    direction  TEXT        NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO schema_migrations_in_progress (version, name, direction) VALUES ($1, $2, $3)`,
+			version, file, direction)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("migration %s: %w", file, err)
+	}
+	if _, err := conn.Exec(ctx, sql); err != nil {
+		return fmt.Errorf("migration %s: %w", file, err)
+	}
+	err = inTx(func(tx pgx.Tx) error {
+		if err := finish(tx); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM schema_migrations_in_progress WHERE version = $1`, version)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("migration %s: %w", file, err)
+	}
+	return nil
+}
+
+// queryer is what pgx.Tx and the pool share for reads.
+type queryer interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// inProgress is a row of schema_migrations_in_progress.
+type inProgress struct {
+	version   int64
+	name      string
+	direction string
+}
+
+func (p inProgress) err() error {
+	return fmt.Errorf("migration %s did not finish (%s): inspect the database (for example drop an invalid index), "+
+		"then run: DELETE FROM schema_migrations_in_progress WHERE version = %d", p.name, p.direction, p.version)
+}
+
+// readInProgress returns the rows of schema_migrations_in_progress by version.
+// A database that never ran a non-transactional migration has no such table;
+// nothing is created.
+func readInProgress(ctx context.Context, q queryer) ([]inProgress, error) {
+	var exists bool
+	if err := q.QueryRow(ctx, `SELECT to_regclass('schema_migrations_in_progress') IS NOT NULL`).Scan(&exists); err != nil || !exists {
+		return nil, err
+	}
+	rows, err := q.Query(ctx, `SELECT version, name, direction FROM schema_migrations_in_progress ORDER BY version`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []inProgress
+	for rows.Next() {
+		var p inProgress
+		if err := rows.Scan(&p.version, &p.name, &p.direction); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// checkNotInterrupted fails when an earlier non-transactional migration did
+// not finish.
+func checkNotInterrupted(ctx context.Context, q queryer) error {
+	rows, err := readInProgress(ctx, q)
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	return rows[0].err()
 }
 
 // checkApplied rejects a database that is ahead of, or inconsistent with, the
@@ -291,12 +573,20 @@ func RevertMigration(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (strin
 	if err != nil {
 		return "", err
 	}
-	tx, err := pool.Begin(ctx)
+	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return "", err
 	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", schemaLockID); err != nil {
+	defer conn.Release()
+	var tx pgx.Tx
+	sl := &sessionLock{conn: conn}
+	defer func() {
+		if tx != nil {
+			tx.Rollback(context.Background())
+		}
+		sl.release()
+	}()
+	if err := lockSchema(ctx, conn, sl, hasNonTransactional(migs) || downIsNonTransactional(fsys, migs), &tx); err != nil {
 		return "", err
 	}
 	var hasTracking bool
@@ -305,6 +595,9 @@ func RevertMigration(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (strin
 	}
 	if !hasTracking {
 		return "", nil
+	}
+	if err := checkNotInterrupted(ctx, tx); err != nil {
+		return "", err
 	}
 	applied, err := readApplied(ctx, tx)
 	if err != nil {
@@ -330,13 +623,30 @@ func RevertMigration(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (strin
 	if err != nil {
 		return "", fmt.Errorf("read migration %s: %w", latest.downFile, err)
 	}
+	remove := func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version = $1`, latest.version)
+		return err
+	}
+	if isNoTransaction(string(body)) {
+		err := tx.Commit(ctx) // nothing written yet; ends the transaction
+		tx = nil
+		if err != nil {
+			return "", err
+		}
+		if err := runOutsideTx(ctx, conn, latest.version, latest.downFile, "down", string(body), remove); err != nil {
+			return "", err
+		}
+		return base, nil
+	}
 	if _, err := tx.Exec(ctx, string(body)); err != nil {
 		return "", fmt.Errorf("migration %s: %w", latest.downFile, err)
 	}
-	if _, err := tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version = $1`, latest.version); err != nil {
+	if err := remove(tx); err != nil {
 		return "", fmt.Errorf("migration %s: %w", latest.downFile, err)
 	}
-	if err := tx.Commit(ctx); err != nil {
+	err = tx.Commit(ctx)
+	tx = nil
+	if err != nil {
 		return "", err
 	}
 	return base, nil
@@ -347,7 +657,7 @@ type StatusLine struct {
 	Version     int64
 	Description string
 	State       string // "applied" or "pending"
-	Checksum    string // "ok", "mismatch", "-", "hole" or "newer"
+	Checksum    string // "ok", "mismatch", "-", "hole", "interrupted" or "newer"
 }
 
 // StatusReport is the read-only view of applied and pending migrations.
@@ -414,6 +724,19 @@ func MigrationStatus(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (Statu
 		rep.Legacy = true
 	}
 	rep.Problems = appliedProblems(migs, applied)
+	interrupted := map[int64]bool{}
+	if hasTracking {
+		stuck, err := readInProgress(ctx, tx)
+		if err != nil {
+			return rep, err
+		}
+		for _, p := range stuck {
+			if p.direction == "up" {
+				interrupted[p.version] = true
+			}
+			rep.Problems = append(rep.Problems, p.err())
+		}
+	}
 
 	var highest int64
 	for v := range applied {
@@ -437,6 +760,9 @@ func MigrationStatus(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) (Statu
 			l.Checksum = "-"
 			if m.version < highest {
 				l.Checksum = "hole"
+			}
+			if interrupted[m.version] {
+				l.Checksum = "interrupted"
 			}
 			rep.Pending++
 		}
