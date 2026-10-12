@@ -6,7 +6,7 @@ Read this before touching any UI. Use the tokens and components below; never har
 - shadcn/ui on Tailwind CSS (v4) with Radix primitives, in the React + TypeScript app under `frontend/`
 - Add components with `npx shadcn@latest add <name>`. They are copied into `frontend/src/components/ui/` and are our code: edit them there, don't wrap them in extra layers
 - Reuse a shadcn component before writing a custom one
-- Style: clean and minimal. The numbers are the content, so keep chrome quiet. One accent color, flat cards, plenty of whitespace
+- Style: clean and minimal. The numbers are the content, so keep chrome quiet. One accent color, rounded soft cards, dense and compact layout in the style of an iPhone fitness app (Apple Fitness/Activity): bold large numbers for totals, small muted labels, a ring summary on the dashboard, and no large empty areas
 
 ## Approved packages
 Approved once; the agent may install these without asking:
@@ -44,7 +44,9 @@ Text must meet WCAG AA contrast (4.5:1) in both themes. Check any new color pair
 - System font stack, no web fonts. Body text 16px; labels and table text 14px; helper text 12px
 - Weights: 400 body, 600 headings and totals
 - Use Tailwind's default spacing scale only. No arbitrary values like `p-[13px]`
-- Radius from `--radius`: `0.5rem` for inputs and buttons, `0.75rem` for cards
+- Radius from `--radius`: `0.5rem` for inputs and buttons, `0.75rem` (`rounded-xl`) for cards
+- Density: card and form padding is 12px (`p-3`), gaps between blocks 12px (`gap-3`), table cells `px-2 py-1.5` with small muted `text-xs` headers, page headings `text-xl`. Cards use a faint `shadow-xs` and a hairline ring. The nav is a compact sticky top bar; there is no bottom tab bar
+- Totals, spent and remaining are bold (`font-semibold` or `font-bold`) and larger than their small muted labels
 - Page content: `max-w-4xl`, centered, 16px side padding on mobile
 - Mobile-first. Tables scroll horizontally inside their own container; the nav stays on one row
 
@@ -72,6 +74,7 @@ Use these shadcn components for these jobs:
 Every list and page has three states: loading (`Skeleton`), empty (a hint about what to do next), and error (with a retry button). Disable the submit button while a request is in flight.
 
 ## Charts
+- The dashboard shows a ring (donut) with the month total in the center, followed by a compact stats row and legend chips
 - Pie slices use each category's own `color` from the database, so a category looks the same everywhere
 - Include a legend with category name and amount. Never rely on color alone
 - Show a clear empty state ("No expenses this month") instead of an empty chart
@@ -80,7 +83,7 @@ Every list and page has three states: loading (`Skeleton`), empty (a hint about 
 - Never color alone. Status is a color plus an icon and a text label:
   - within budget: `--success`, check icon, "Within budget"
   - over budget: `--destructive`, warning icon, "Over by 12 000 ₸"
-- Progress bars show spent / budget; cap the fill at 100% and show the overage as text
+- Progress bars (thin, `h-1.5`, rounded) show spent / budget; cap the fill at 100% and show the overage as text
 
 ## Accessibility
 - Every input has a label; every icon-only button has an `aria-label`
